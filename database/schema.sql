@@ -54,6 +54,7 @@ CREATE TABLE delivery_staff (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(140) NOT NULL,
   phone VARCHAR(40) NOT NULL,
+  access_code_hash VARCHAR(255) NULL,
   status ENUM('available', 'busy', 'absent') NOT NULL DEFAULT 'available',
   active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -138,6 +139,19 @@ CREATE TABLE notifications (
   sent_at TIMESTAMP NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_notifications_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
+);
+
+CREATE TABLE audit_logs (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT UNSIGNED NULL,
+  user_name VARCHAR(140) NULL,
+  action VARCHAR(80) NOT NULL,
+  entity VARCHAR(80) NOT NULL,
+  entity_id BIGINT UNSIGNED NULL,
+  details TEXT NULL,
+  ip_address VARCHAR(64) NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE INDEX idx_orders_status_created ON orders(status, created_at);

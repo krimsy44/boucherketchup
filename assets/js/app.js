@@ -7,12 +7,16 @@ const state = {
   sort: 'popular',
   cart: [],
   deliveryStaff: [],
+  driverPhone: localStorage.getItem('ck_driver_phone') || '',
+  driverCode: '',
   adminOrders: [],
   notifications: [],
   contactMessages: [],
   customers: [],
   users: [],
+  auditLogs: [],
   stats: null,
+  checks: [],
   token: localStorage.getItem('ck_token') || '',
   user: JSON.parse(localStorage.getItem('ck_user') || 'null'),
 };
@@ -49,6 +53,7 @@ function showPage(page) {
 
   if (page === 'menu') renderMenu();
   if (page === 'admin' && state.token) loadAdmin();
+  if (page === 'driver' && state.driverPhone && state.driverCode) loadDriverDashboard().catch((error) => toast(error.message));
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -61,6 +66,19 @@ function showLogin() {
   qs('#admin-content').classList.add('hidden');
   qs('#logout-admin').classList.add('hidden');
   qs('#admin-user').textContent = 'Connectez-vous pour gérer les commandes.';
+}
+
+async function logoutAdmin() {
+  try {
+    if (state.token) {
+      await api('auth/logout', { method: 'POST' });
+    }
+  } catch (error) {
+    console.warn(error);
+  } finally {
+    showLogin();
+    toast('Session fermee.');
+  }
 }
 
 function can(permission) {
@@ -93,14 +111,15 @@ function sortedItems(items) {
 }
 
 function foodCard(item) {
-  const disabled = item.available ? '' : 'disabled';
-  const buttonText = item.available ? '+' : 'Indispo';
   const media = item.image_url
     ? `<img class="food-img" src="${item.image_url}" alt="${item.name}" loading="lazy">`
     : `<div class="food-emoji">${item.emoji}</div>`;
+  const action = item.available
+    ? `<button class="add" data-add="${item.id}" aria-label="Ajouter ${item.name} au panier">+</button>`
+    : '<span class="unavailable-badge">Indisponible</span>';
 
   return `
-    <article class="food-card">
+    <article class="food-card ${item.available ? '' : 'is-unavailable'}">
       ${media}
       <div class="food-body">
         <div class="food-meta">${categoryLabel(item.category)}</div>
@@ -108,7 +127,7 @@ function foodCard(item) {
         <p>${item.description}</p>
         <div class="food-actions">
           <span class="price">${priceLabel(item)}</span>
-          <button class="add" data-add="${item.id}" ${disabled}>${buttonText}</button>
+          ${action}
         </div>
       </div>
     </article>`;
@@ -261,6 +280,95 @@ function orderCard(order) {
   `;
 }
 
+function driverOrderCard(order) {
+  return `
+    <article class="panel driver-order">
+      <div class="section-head">
+        <div>
+          <h3>${order.number}</h3>
+          <p class="muted">${new Date(order.created_at).toLocaleString('fr-FR')}</p>
+        </div>
+        <span class="badge ${order.status}">${statusLabel(order.status)}</span>
+      </div>
+      <p><strong>${order.customer_name}</strong> - <a href="tel:${order.phone}">${order.phone}</a></p>
+      <p>${order.address}</p>
+      ${order.note ? `<p class="muted">${order.note}</p>` : ''}
+      <p>${orderItemsText(order)}</p>
+      <p class="price">${money(order.total)}</p>
+      <p class="muted">${paymentMethodLabel(order.payment_method)} - ${paymentStatusLabel(order.payment_status)}</p>
+      <div class="actions">
+        <a class="secondary small link-button" href="tel:${order.phone}">Appeler</a>
+        <button class="secondary small" data-driver-status="${order.id}" data-status="delivery" ${order.status === 'delivery' ? 'disabled' : ''}>En livraison</button>
+        <button class="primary small" data-driver-status="${order.id}" data-status="done">Livree</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderDriverDashboard(payload) {
+  const orders = payload.orders || [];
+  qs('#driver-dashboard').innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi"><span>Livreur</span><strong>${payload.driver.name}</strong></div>
+      <div class="kpi"><span>Courses actives</span><strong>${payload.summary.assigned}</strong></div>
+      <div class="kpi"><span>A recuperer</span><strong>${payload.summary.prep}</strong></div>
+      <div class="kpi"><span>En livraison</span><strong>${payload.summary.delivery}</strong></div>
+    </div>
+    <div class="actions">
+      <button class="secondary" type="button" data-driver-refresh>Rafraichir</button>
+      <button class="secondary danger" type="button" data-driver-logout>Changer de livreur</button>
+    </div>
+    ${orders.length ? orders.map(driverOrderCard).join('') : '<p class="panel muted">Aucune course active pour ce livreur.</p>'}
+  `;
+}
+
+async function loadDriverDashboard(phone = state.driverPhone, code = state.driverCode) {
+  if (!phone) return;
+  const payload = await api('driver/dashboard', {
+    method: 'POST',
+    body: JSON.stringify({ phone, code }),
+  });
+  state.driverPhone = phone;
+  state.driverCode = code;
+  localStorage.setItem('ck_driver_phone', phone);
+  renderDriverDashboard(payload);
+}
+
+async function submitDriverLogin(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const phone = form.get('phone');
+  const code = form.get('code');
+  try {
+    await loadDriverDashboard(phone, code);
+    toast('Courses chargees.');
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function updateDriverOrderStatus(orderId, status) {
+  try {
+    const payload = await api('driver/order-status', {
+      method: 'PATCH',
+      body: JSON.stringify({ phone: state.driverPhone, code: state.driverCode, order_id: Number(orderId), status }),
+    });
+    renderDriverDashboard(payload);
+    toast(status === 'done' ? 'Commande livree.' : 'Commande en livraison.');
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function logoutDriver() {
+  state.driverPhone = '';
+  state.driverCode = '';
+  localStorage.removeItem('ck_driver_phone');
+  qs('#driver-login-form').reset();
+  qs('#driver-dashboard').innerHTML = '';
+  toast('Espace livreur ferme.');
+}
+
 async function submitOrder(event) {
   event.preventDefault();
   if (state.cart.length === 0) {
@@ -268,20 +376,32 @@ async function submitOrder(event) {
     return;
   }
 
+  const submitButton = event.currentTarget.querySelector('[type="submit"]');
   const form = new FormData(event.currentTarget);
+  const fulfillment = form.get('fulfillment');
+  const address = String(form.get('address') || '').trim();
+  if (fulfillment === 'delivery' && address === '') {
+    toast('Adresse obligatoire pour une livraison.');
+    return;
+  }
+
   const body = {
     customer: {
       name: form.get('name'),
       phone: form.get('phone'),
-      address: form.get('address'),
+      address: address || 'Retrait sur place',
       note: form.get('note'),
     },
-    fulfillment: form.get('fulfillment'),
+    fulfillment,
     payment_method: form.get('payment_method'),
     items: state.cart.map((item) => ({ id: item.id, qty: item.qty })),
   };
 
   try {
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = 'Validation...';
+    }
     const payload = await api('orders', { method: 'POST', body: JSON.stringify(body) });
     state.cart = [];
     renderCart();
@@ -292,6 +412,11 @@ async function submitOrder(event) {
     qs('#tracking-results').innerHTML = orderCard(payload.order);
   } catch (error) {
     toast(error.message);
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = 'Commander maintenant';
+    }
   }
 }
 
@@ -577,10 +702,19 @@ function renderDeliveryStaff() {
   `).join('');
 }
 
+function generatedSecret(length = 12) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = new Uint32Array(length);
+  if (window.crypto?.getRandomValues) crypto.getRandomValues(bytes);
+  else bytes.forEach((_, index) => { bytes[index] = Math.floor(Math.random() * chars.length); });
+  return [...bytes].map((value) => chars[value % chars.length]).join('');
+}
+
 function resetDeliveryForm() {
   const form = qs('#delivery-form');
   form.reset();
   form.elements.id.value = '';
+  form.elements.access_code.value = '';
   form.elements.active.checked = true;
   qs('#delivery-form-title').textContent = 'Ajouter un livreur';
 }
@@ -592,6 +726,7 @@ function editDeliveryStaff(id) {
   form.elements.id.value = driver.id;
   form.elements.name.value = driver.name;
   form.elements.phone.value = driver.phone;
+  form.elements.access_code.value = '';
   form.elements.status.value = driver.status;
   form.elements.active.checked = Boolean(driver.active);
   qs('#delivery-form-title').textContent = `Modifier ${driver.name}`;
@@ -609,13 +744,14 @@ function notificationStatusLabel(status) {
 function renderNotifications(notifications = state.notifications) {
   state.notifications = notifications;
   qs('#notifications-table').innerHTML = tableHtml(
-    ['Date', 'Commande', 'Canal', 'Client', 'Message', 'Statut', 'Actions'],
+    ['Date', 'Commande', 'Canal', 'Client', 'Message', 'Provider', 'Statut', 'Actions'],
     notifications.map((item) => [
       new Date(item.created_at).toLocaleString('fr-FR'),
       item.order_number || '-',
       item.channel,
       item.recipient,
       `<span class="truncate">${item.message}</span>`,
+      `${item.provider || 'manual'}${item.provider_reference ? `<p class="muted">${item.provider_reference}</p>` : ''}`,
       `<span class="badge ${item.status === 'sent' ? 'done' : item.status === 'failed' ? 'pay-failed' : 'pay-pending'}">${notificationStatusLabel(item.status)}</span>`,
       `<a class="secondary small link-button" href="${item.whatsapp_url}" target="_blank" rel="noreferrer">WhatsApp</a>
        <button class="secondary small" data-notification-status="${item.id}" data-status="sent">Envoyée</button>
@@ -639,6 +775,21 @@ function renderContactMessages(messages = state.contactMessages) {
   );
 }
 
+function renderAuditLogs(logs = state.auditLogs) {
+  state.auditLogs = logs;
+  qs('#audit-table').innerHTML = tableHtml(
+    ['Date', 'Utilisateur', 'Action', 'Cible', 'Details', 'IP'],
+    logs.map((log) => [
+      new Date(log.created_at).toLocaleString('fr-FR'),
+      log.user_name || '-',
+      log.action,
+      `${log.entity}${log.entity_id ? ` #${log.entity_id}` : ''}`,
+      `<span class="truncate">${Object.entries(log.details || {}).map(([key, value]) => `${key}: ${value ?? '-'}`).join(', ') || '-'}</span>`,
+      log.ip_address || '-',
+    ])
+  );
+}
+
 function roleLabel(role) {
   return {
     super_admin: 'Super Admin',
@@ -650,11 +801,12 @@ function roleLabel(role) {
 function renderUsers(users = state.users) {
   state.users = users;
   qs('#users-table').innerHTML = tableHtml(
-    ['Nom', 'Email', 'Rôle', 'Statut', 'Actions'],
+    ['Nom', 'Email', 'Role', 'Securite', 'Statut', 'Actions'],
     users.map((user) => [
       user.name,
       user.email,
       roleLabel(user.role),
+      user.uses_demo_password ? '<span class="badge pay-pending">Mot de passe demo</span>' : '<span class="badge done">OK</span>',
       user.active ? '<span class="badge done">Actif</span>' : '<span class="badge pay-failed">Inactif</span>',
       `<button class="secondary small" data-edit-user="${user.id}">Modifier</button>`,
     ])
@@ -712,6 +864,7 @@ async function saveUser(event) {
     });
     renderUsers(payload.users);
     resetUserForm();
+    await loadSystemChecks();
     toast(body.id ? 'Utilisateur modifié.' : 'Utilisateur ajouté.');
   } catch (error) {
     toast(error.message);
@@ -745,6 +898,16 @@ async function loadCustomers() {
   }
 }
 
+async function loadAuditLogs() {
+  if (!can('can_view_stats')) return;
+  try {
+    const payload = await api('admin/audit-log');
+    renderAuditLogs(payload.logs);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 async function updateContactMessageStatus(id, handled) {
   try {
     const payload = await api('admin/contact-message-status', {
@@ -766,6 +929,7 @@ async function saveDeliveryStaff(event) {
     id: data.get('id') ? Number(data.get('id')) : undefined,
     name: data.get('name'),
     phone: data.get('phone'),
+    access_code: data.get('access_code') || '',
     status: data.get('status'),
     active: form.elements.active.checked,
   };
@@ -778,6 +942,7 @@ async function saveDeliveryStaff(event) {
     state.deliveryStaff = payload.delivery_staff;
     renderDeliveryStaff();
     resetDeliveryForm();
+    await loadSystemChecks();
     toast(body.id ? 'Livreur modifie.' : 'Livreur ajoute.');
   } catch (error) {
     toast(error.message);
@@ -828,6 +993,34 @@ function renderStats(stats) {
     ['Méthode', 'Statut', 'Nb', 'Montant'],
     stats.payment_breakdown.map((row) => [paymentMethodLabel(row.method), paymentStatusLabel(row.status), row.count, money(row.amount)])
   );
+}
+
+function renderSystemChecks(checks = state.checks) {
+  state.checks = checks || [];
+  const target = qs('#system-checks');
+  if (!target) return;
+  target.innerHTML = state.checks.length
+    ? state.checks.map((check) => `
+      <div class="check-line ${check.status}">
+        <span class="badge ${check.status === 'ok' ? 'done' : 'pay-pending'}">${check.status === 'ok' ? 'OK' : 'Action'}</span>
+        <div>
+          <strong>${check.label}</strong>
+          <p class="muted">${check.message}</p>
+        </div>
+      </div>
+    `).join('')
+    : '<p class="muted">Controle non charge.</p>';
+}
+
+async function loadSystemChecks() {
+  if (!can('can_view_stats')) return;
+  try {
+    const payload = await api('admin/system-check');
+    renderSystemChecks(payload.checks);
+    toast('Controle preproduction actualise.');
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
 async function loadStats() {
@@ -904,6 +1097,7 @@ async function loadAdmin() {
     qs('#admin-user').textContent = `${state.user.name} - ${state.user.role}`;
     applyRoleUI();
     state.deliveryStaff = payload.delivery_staff || [];
+    renderSystemChecks(payload.checks || []);
 
     qs('#kpi-grid').innerHTML = `
       <div class="kpi"><span>CA aujourd'hui</span><strong>${money(payload.summary.revenue_today)}</strong></div>
@@ -921,6 +1115,7 @@ async function loadAdmin() {
     await loadStats();
     await loadNotifications();
     await loadUsers();
+    await loadAuditLogs();
   } catch (error) {
     showLogin();
     toast(error.message);
@@ -972,6 +1167,29 @@ async function queueNotification(orderId, template = 'confirmation') {
     renderNotifications(payload.notifications);
     toast('Notification préparée.');
     if (payload.notification.whatsapp_url) {
+      window.open(payload.notification.whatsapp_url, '_blank', 'noopener,noreferrer');
+    }
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function sendNotificationTest(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  try {
+    const payload = await api('admin/notification-test', {
+      method: 'POST',
+      body: JSON.stringify({
+        channel: data.get('channel'),
+        recipient: data.get('recipient'),
+        message: data.get('message'),
+      }),
+    });
+    renderNotifications(payload.notifications);
+    toast(payload.notification.status === 'sent' ? 'Notification de test envoyee.' : 'Notification de test preparee.');
+    if (payload.notification.whatsapp_url && payload.notification.provider === 'manual') {
       window.open(payload.notification.whatsapp_url, '_blank', 'noopener,noreferrer');
     }
   } catch (error) {
@@ -1126,6 +1344,7 @@ function bindEvents() {
       if (adminTab.dataset.adminTab === 'stats') loadStats();
       if (adminTab.dataset.adminTab === 'notifications') loadNotifications();
       if (adminTab.dataset.adminTab === 'clients') loadCustomers();
+      if (adminTab.dataset.adminTab === 'audit') loadAuditLogs();
       if (adminTab.dataset.adminTab === 'messages') loadContactMessages();
       if (adminTab.dataset.adminTab === 'users') loadUsers();
     }
@@ -1148,6 +1367,22 @@ function bindEvents() {
     const exportPdfButton = event.target.closest('[data-export-pdf]');
     if (exportPdfButton) exportPdf(exportPdfButton.dataset.exportPdf);
 
+    if (event.target.closest('[data-system-check]')) loadSystemChecks();
+
+    if (event.target.closest('[data-audit-refresh]')) loadAuditLogs();
+
+    if (event.target.closest('[data-generate-delivery-code]')) {
+      const code = generatedSecret(8);
+      qs('#delivery-form').elements.access_code.value = code;
+      toast(`Code livreur genere: ${code}`);
+    }
+
+    if (event.target.closest('[data-generate-user-password]')) {
+      const password = generatedSecret(14);
+      qs('#user-form').elements.password.value = password;
+      toast(`Mot de passe genere: ${password}`);
+    }
+
     const notifyButton = event.target.closest('[data-notify-order]');
     if (notifyButton) queueNotification(notifyButton.dataset.notifyOrder, notifyButton.dataset.template);
 
@@ -1159,6 +1394,15 @@ function bindEvents() {
 
     const editUserButton = event.target.closest('[data-edit-user]');
     if (editUserButton) editUser(editUserButton.dataset.editUser);
+
+    const driverStatusButton = event.target.closest('[data-driver-status]');
+    if (driverStatusButton) updateDriverOrderStatus(driverStatusButton.dataset.driverStatus, driverStatusButton.dataset.status);
+
+    if (event.target.closest('[data-driver-refresh]')) {
+      loadDriverDashboard().then(() => toast('Courses actualisees.')).catch((error) => toast(error.message));
+    }
+
+    if (event.target.closest('[data-driver-logout]')) logoutDriver();
   });
 
   qs('#sort-menu').addEventListener('change', (event) => {
@@ -1168,17 +1412,16 @@ function bindEvents() {
   qs('#open-cart').addEventListener('click', () => toggleCart(true));
   qs('#close-cart').addEventListener('click', () => toggleCart(false));
   qs('#scrim').addEventListener('click', () => toggleCart(false));
-  qs('#logout-admin').addEventListener('click', () => {
-    showLogin();
-    toast('Session fermée.');
-  });
+  qs('#logout-admin').addEventListener('click', logoutAdmin);
   qs('#checkout-form').addEventListener('submit', submitOrder);
   qs('#tracking-form').addEventListener('submit', trackOrder);
+  qs('#driver-login-form').addEventListener('submit', submitDriverLogin);
   qs('#login-form').addEventListener('submit', login);
   qs('#menu-form').addEventListener('submit', saveMenuItem);
   qs('#menu-form-reset').addEventListener('click', resetMenuForm);
   qs('#delivery-form').addEventListener('submit', saveDeliveryStaff);
   qs('#delivery-form-reset').addEventListener('click', resetDeliveryForm);
+  qs('#notification-test-form').addEventListener('submit', sendNotificationTest);
   qs('#user-form').addEventListener('submit', saveUser);
   qs('#user-form-reset').addEventListener('click', resetUserForm);
   qs('#contact-form').addEventListener('submit', async (event) => {
@@ -1222,6 +1465,9 @@ async function init() {
   renderCart();
   try {
     await loadCatalog();
+    if (state.driverPhone) {
+      qs('#driver-login-form').elements.phone.value = state.driverPhone;
+    }
     const initialPage = new URLSearchParams(window.location.search).get('page');
     if (initialPage && qs(`#page-${initialPage}`)) showPage(initialPage);
   } catch (error) {

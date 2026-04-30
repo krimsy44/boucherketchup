@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 const APP_ROOT = __DIR__ . '/..';
 const SESSION_FILE = APP_ROOT . '/storage/sessions.json';
+const RATE_LIMIT_FILE = APP_ROOT . '/storage/rate-limits.json';
 const UPLOAD_ROOT = APP_ROOT . '/uploads/menu';
 const UPLOAD_PUBLIC_PATH = 'uploads/menu';
 
@@ -90,6 +91,11 @@ function app_pdo(): PDO
     return $pdo;
 }
 
+function app_is_production(): bool
+{
+    return app_env('APP_ENV', 'local') === 'production';
+}
+
 function app_install_schema(PDO $pdo): void
 {
     $statements = [
@@ -139,6 +145,7 @@ function app_install_schema(PDO $pdo): void
             id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(140) NOT NULL,
             phone VARCHAR(40) NOT NULL,
+            access_code_hash VARCHAR(255) NULL,
             status ENUM('available', 'busy', 'absent') NOT NULL DEFAULT 'available',
             active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -213,9 +220,22 @@ function app_install_schema(PDO $pdo): void
             message TEXT NOT NULL,
             status ENUM('queued', 'sent', 'failed') NOT NULL DEFAULT 'queued',
             provider VARCHAR(80) NULL,
+            provider_reference VARCHAR(120) NULL,
             sent_at TIMESTAMP NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_notifications_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
+        )",
+        "CREATE TABLE IF NOT EXISTS audit_logs (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id BIGINT UNSIGNED NULL,
+            user_name VARCHAR(140) NULL,
+            action VARCHAR(80) NOT NULL,
+            entity VARCHAR(80) NOT NULL,
+            entity_id BIGINT UNSIGNED NULL,
+            details TEXT NULL,
+            ip_address VARCHAR(64) NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
         )",
     ];
 
@@ -225,6 +245,9 @@ function app_install_schema(PDO $pdo): void
 
     app_ensure_column($pdo, 'menu_items', 'active', 'ALTER TABLE menu_items ADD active BOOLEAN NOT NULL DEFAULT TRUE AFTER available');
     app_ensure_column($pdo, 'payments', 'checkout_url', 'ALTER TABLE payments ADD checkout_url VARCHAR(255) NULL AFTER reference');
+    app_ensure_column($pdo, 'notifications', 'provider_reference', 'ALTER TABLE notifications ADD provider_reference VARCHAR(120) NULL AFTER provider');
+    app_ensure_column($pdo, 'delivery_staff', 'access_code_hash', 'ALTER TABLE delivery_staff ADD access_code_hash VARCHAR(255) NULL AFTER phone');
+    app_backfill_delivery_codes($pdo);
 }
 
 function app_ensure_column(PDO $pdo, string $table, string $column, string $alter): void
@@ -236,6 +259,21 @@ function app_ensure_column(PDO $pdo, string $table, string $column, string $alte
     $stmt->execute([$table, $column]);
     if ((int) $stmt->fetchColumn() === 0) {
         $pdo->exec($alter);
+    }
+}
+
+function app_backfill_delivery_codes(PDO $pdo): void
+{
+    $stmt = $pdo->query('SELECT id FROM delivery_staff WHERE access_code_hash IS NULL OR access_code_hash = ""');
+    $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    if ($ids === []) {
+        return;
+    }
+
+    $hash = password_hash(app_env('DELIVERY_DEFAULT_CODE', '1234'), PASSWORD_DEFAULT);
+    $update = $pdo->prepare('UPDATE delivery_staff SET access_code_hash = ? WHERE id = ?');
+    foreach ($ids as $id) {
+        $update->execute([$hash, $id]);
     }
 }
 
@@ -287,9 +325,9 @@ function app_seed_payload(): array
             ['name' => 'Thiéboudienne', 'description' => 'Plat local sénégalais.', 'price' => 2500, 'category' => 'repas', 'emoji' => '🍚', 'popular' => true],
         ],
         'users' => [
-            ['name' => 'Super Admin', 'email' => 'admin@chezketchup.com', 'password' => 'ChangeMe123!', 'role' => 'super_admin'],
-            ['name' => 'Gérant', 'email' => 'gerant@chezketchup.com', 'password' => 'ChangeMe123!', 'role' => 'manager'],
-            ['name' => 'Caisse', 'email' => 'caisse@chezketchup.com', 'password' => 'ChangeMe123!', 'role' => 'cashier'],
+            ['name' => 'Super Admin', 'email' => app_env('ADMIN_EMAIL', 'admin@chezketchup.com'), 'password' => app_env('ADMIN_PASSWORD', 'ChangeMe123!'), 'role' => 'super_admin'],
+            ['name' => 'Gérant', 'email' => 'gerant@chezketchup.com', 'password' => app_env('ADMIN_PASSWORD', 'ChangeMe123!'), 'role' => 'manager'],
+            ['name' => 'Caisse', 'email' => 'caisse@chezketchup.com', 'password' => app_env('ADMIN_PASSWORD', 'ChangeMe123!'), 'role' => 'cashier'],
         ],
     ];
 }
@@ -370,13 +408,13 @@ function app_seed_delivery_staff(PDO $pdo): void
         return;
     }
 
-    $stmt = $pdo->prepare('INSERT INTO delivery_staff (name, phone, status) VALUES (?, ?, ?)');
+    $stmt = $pdo->prepare('INSERT INTO delivery_staff (name, phone, access_code_hash, status) VALUES (?, ?, ?, ?)');
     foreach ([
         ['Moussa Diop', '+221 77 400 10 10', 'available'],
         ['Cheikh Fall', '+221 78 401 20 20', 'available'],
         ['Abdou Sarr', '+221 76 402 30 30', 'absent'],
     ] as $driver) {
-        $stmt->execute($driver);
+        $stmt->execute([$driver[0], $driver[1], password_hash(app_env('DELIVERY_DEFAULT_CODE', '1234'), PASSWORD_DEFAULT), $driver[2]]);
     }
 }
 
@@ -387,7 +425,35 @@ function app_sessions(): array
     }
 
     $decoded = json_decode((string) file_get_contents(SESSION_FILE), true);
-    return is_array($decoded) ? $decoded : [];
+    if (!is_array($decoded)) {
+        return [];
+    }
+
+    $sessions = app_pruned_sessions($decoded);
+    if (count($sessions) !== count($decoded)) {
+        app_save_sessions($sessions);
+    }
+
+    return $sessions;
+}
+
+function app_session_ttl_seconds(): int
+{
+    return max(1, (int) app_env('SESSION_TTL_HOURS', '12')) * 3600;
+}
+
+function app_pruned_sessions(array $sessions): array
+{
+    $now = time();
+    return array_filter($sessions, function (array $session) use ($now): bool {
+        $expiresAt = strtotime((string) ($session['expires_at'] ?? ''));
+        if ($expiresAt > 0) {
+            return $expiresAt > $now;
+        }
+
+        $createdAt = strtotime((string) ($session['created_at'] ?? ''));
+        return $createdAt > 0 && ($createdAt + app_session_ttl_seconds()) > $now;
+    });
 }
 
 function app_save_sessions(array $sessions): void
@@ -397,6 +463,92 @@ function app_save_sessions(array $sessions): void
     }
 
     file_put_contents(SESSION_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+function app_rate_limits(): array
+{
+    if (!file_exists(RATE_LIMIT_FILE)) {
+        return [];
+    }
+
+    $decoded = json_decode((string) file_get_contents(RATE_LIMIT_FILE), true);
+    return is_array($decoded) ? $decoded : [];
+}
+
+function app_save_rate_limits(array $limits): void
+{
+    if (!is_dir(dirname(RATE_LIMIT_FILE))) {
+        mkdir(dirname(RATE_LIMIT_FILE), 0775, true);
+    }
+
+    file_put_contents(RATE_LIMIT_FILE, json_encode($limits, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+function app_client_ip(): string
+{
+    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'] as $key) {
+        $value = trim((string) ($_SERVER[$key] ?? ''));
+        if ($value !== '') {
+            return trim(explode(',', $value)[0]);
+        }
+    }
+
+    return 'local';
+}
+
+function app_rate_limit_key(string $scope, string $identifier): string
+{
+    return hash('sha256', $scope . '|' . strtolower(trim($identifier)) . '|' . app_client_ip());
+}
+
+function app_check_rate_limit(string $scope, string $identifier): void
+{
+    $maxAttempts = max(1, (int) app_env('AUTH_MAX_ATTEMPTS', '5'));
+    $windowSeconds = max(60, (int) app_env('AUTH_LOCK_MINUTES', '15') * 60);
+    $key = app_rate_limit_key($scope, $identifier);
+    $limits = app_rate_limits();
+    $entry = $limits[$key] ?? null;
+
+    if (!is_array($entry)) {
+        return;
+    }
+
+    $firstAt = (int) ($entry['first_at'] ?? 0);
+    $attempts = (int) ($entry['attempts'] ?? 0);
+    if ($firstAt <= 0 || time() - $firstAt > $windowSeconds) {
+        unset($limits[$key]);
+        app_save_rate_limits($limits);
+        return;
+    }
+
+    if ($attempts >= $maxAttempts) {
+        $retryAfter = max(1, $windowSeconds - (time() - $firstAt));
+        header('Retry-After: ' . $retryAfter);
+        app_json_response(['ok' => false, 'message' => 'Trop de tentatives. Reessayez plus tard.'], 429);
+    }
+}
+
+function app_record_rate_limit(string $scope, string $identifier, bool $success): void
+{
+    $windowSeconds = max(60, (int) app_env('AUTH_LOCK_MINUTES', '15') * 60);
+    $key = app_rate_limit_key($scope, $identifier);
+    $limits = app_rate_limits();
+
+    if ($success) {
+        unset($limits[$key]);
+        app_save_rate_limits($limits);
+        return;
+    }
+
+    $entry = $limits[$key] ?? ['attempts' => 0, 'first_at' => time()];
+    if (!is_array($entry) || time() - (int) ($entry['first_at'] ?? 0) > $windowSeconds) {
+        $entry = ['attempts' => 0, 'first_at' => time()];
+    }
+    $entry['attempts'] = (int) ($entry['attempts'] ?? 0) + 1;
+    $entry['last_at'] = time();
+    $limits[$key] = $entry;
+
+    app_save_rate_limits($limits);
 }
 
 function app_authorization_header(): string
@@ -441,6 +593,19 @@ function app_require_user(): array
     }
 
     return $sessions[$token];
+}
+
+function app_logout(): void
+{
+    $header = app_authorization_header();
+    $token = preg_match('/Bearer\s+(.+)/i', $header, $matches) ? trim($matches[1]) : '';
+    if ($token === '') {
+        return;
+    }
+
+    $sessions = app_sessions();
+    unset($sessions[$token]);
+    app_save_sessions($sessions);
 }
 
 function app_require_role(array $user, array $roles): void
@@ -554,6 +719,121 @@ function app_orders(string $query = '', int $limit = 20): array
     return $orders;
 }
 
+function app_normalized_phone(string $phone): string
+{
+    $digits = preg_replace('/\D+/', '', $phone) ?: '';
+    if (str_starts_with($digits, '00')) {
+        $digits = substr($digits, 2);
+    }
+    if (strlen($digits) === 9) {
+        $digits = '221' . $digits;
+    }
+    return $digits;
+}
+
+function app_delivery_dashboard(array $body): array
+{
+    $phone = trim((string) ($body['phone'] ?? ''));
+    $code = trim((string) ($body['code'] ?? ''));
+    $normalized = app_normalized_phone($phone);
+    if ($normalized === '' || $code === '') {
+        app_json_response(['ok' => false, 'message' => 'Telephone et code livreur requis.'], 422);
+    }
+    app_check_rate_limit('driver', $normalized);
+
+    $pdo = app_pdo();
+    $rows = $pdo->query('SELECT id, name, phone, access_code_hash, status, active FROM delivery_staff WHERE active = 1')->fetchAll();
+    $driverRow = null;
+    foreach ($rows as $entry) {
+        if (app_normalized_phone((string) $entry['phone']) === $normalized) {
+            $driverRow = $entry;
+            break;
+        }
+    }
+
+    if ($driverRow === null || !password_verify($code, (string) ($driverRow['access_code_hash'] ?? ''))) {
+        app_record_rate_limit('driver', $normalized, false);
+        app_json_response(['ok' => false, 'message' => 'Acces livreur invalide.'], 403);
+    }
+    if (app_is_production() && hash_equals(app_env('DELIVERY_DEFAULT_CODE', '1234'), $code)) {
+        app_record_rate_limit('driver', $normalized, false);
+        app_json_response(['ok' => false, 'message' => 'Code livreur de demonstration refuse en production.'], 403);
+    }
+    app_record_rate_limit('driver', $normalized, true);
+
+    $driver = app_delivery_staff_one((int) $driverRow['id']);
+    $stmt = $pdo->prepare(
+        "SELECT o.*, p.method AS payment_method, p.status AS payment_status, p.reference AS payment_reference,
+                d.name AS delivery_name, d.phone AS delivery_phone, d.status AS delivery_staff_status
+         FROM orders o
+         LEFT JOIN payments p ON p.order_id = o.id
+         LEFT JOIN delivery_staff d ON d.id = o.delivery_staff_id
+         WHERE o.delivery_staff_id = ?
+           AND o.status IN ('prep', 'delivery')
+         ORDER BY o.created_at ASC, o.id ASC"
+    );
+    $stmt->execute([(int) $driver['id']]);
+    $orders = $stmt->fetchAll();
+    $items = app_order_items(array_map(fn ($order) => (int) $order['id'], $orders));
+
+    foreach ($orders as &$order) {
+        $order['id'] = (int) $order['id'];
+        $order['total'] = (int) $order['total'];
+        $order['delivery_staff_id'] = (int) $order['delivery_staff_id'];
+        $order['items'] = $items[$order['id']] ?? [];
+    }
+
+    return [
+        'driver' => $driver,
+        'orders' => $orders,
+        'summary' => [
+            'assigned' => count($orders),
+            'delivery' => count(array_filter($orders, fn ($order) => $order['status'] === 'delivery')),
+            'prep' => count(array_filter($orders, fn ($order) => $order['status'] === 'prep')),
+        ],
+    ];
+}
+
+function app_update_delivery_order_status(array $body): array
+{
+    $phone = trim((string) ($body['phone'] ?? ''));
+    $code = trim((string) ($body['code'] ?? ''));
+    $orderId = (int) ($body['order_id'] ?? 0);
+    $status = (string) ($body['status'] ?? '');
+
+    if ($orderId <= 0 || !in_array($status, ['delivery', 'done'], true)) {
+        app_json_response(['ok' => false, 'message' => 'Mise a jour livreur invalide.'], 422);
+    }
+
+    $dashboard = app_delivery_dashboard(['phone' => $phone, 'code' => $code]);
+    $allowedOrderIds = array_map(fn ($order) => (int) $order['id'], $dashboard['orders']);
+    if (!in_array($orderId, $allowedOrderIds, true)) {
+        app_json_response(['ok' => false, 'message' => 'Commande non assignee a ce livreur.'], 403);
+    }
+
+    $pdo = app_pdo();
+    $stmt = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ? AND delivery_staff_id = ?');
+    $stmt->execute([$status, $orderId, (int) $dashboard['driver']['id']]);
+    $pdo->prepare('INSERT INTO order_status_history (order_id, status, changed_by, note) VALUES (?, ?, NULL, ?)')
+        ->execute([$orderId, $status, 'Mise a jour livreur']);
+
+    if ($status === 'done') {
+        $active = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_staff_id = ? AND status = 'delivery'");
+        $active->execute([(int) $dashboard['driver']['id']]);
+        if ((int) $active->fetchColumn() === 0) {
+            $pdo->prepare("UPDATE delivery_staff SET status = 'available' WHERE id = ? AND status = 'busy'")
+                ->execute([(int) $dashboard['driver']['id']]);
+        }
+    } else {
+        $pdo->prepare("UPDATE delivery_staff SET status = 'busy' WHERE id = ? AND status = 'available'")
+            ->execute([(int) $dashboard['driver']['id']]);
+    }
+
+    app_queue_notification($orderId, $status, 'whatsapp');
+
+    return app_delivery_dashboard(['phone' => $phone, 'code' => $code]);
+}
+
 function app_new_order_number(): string
 {
     $prefix = 'CK-' . date('Y') . '-';
@@ -574,10 +854,18 @@ function app_create_order(array $body): array
         app_json_response(['ok' => false, 'message' => 'Le panier est vide.'], 422);
     }
 
-    foreach (['name', 'phone', 'address'] as $field) {
+    foreach (['name', 'phone'] as $field) {
         if (trim((string) ($customer[$field] ?? '')) === '') {
             app_json_response(['ok' => false, 'message' => 'Informations client incomplètes.'], 422);
         }
+    }
+
+    $fulfillment = (string) ($body['fulfillment'] ?? 'delivery');
+    if (!in_array($fulfillment, ['delivery', 'pickup'], true)) {
+        app_json_response(['ok' => false, 'message' => 'Mode de retrait invalide.'], 422);
+    }
+    if ($fulfillment === 'delivery' && trim((string) ($customer['address'] ?? '')) === '') {
+        app_json_response(['ok' => false, 'message' => 'Adresse obligatoire pour une livraison.'], 422);
     }
 
     $pdo = app_pdo();
@@ -605,7 +893,10 @@ function app_create_order(array $body): array
 
     $name = trim((string) $customer['name']);
     $phone = trim((string) $customer['phone']);
-    $address = trim((string) $customer['address']);
+    $address = trim((string) ($customer['address'] ?? ''));
+    if ($address === '') {
+        $address = 'Retrait sur place';
+    }
 
     $pdo->beginTransaction();
     $pdo->prepare(
@@ -625,7 +916,7 @@ function app_create_order(array $body): array
         $phone,
         $address,
         trim((string) ($customer['note'] ?? '')),
-        $body['fulfillment'] ?? 'delivery',
+        $fulfillment,
         'pending',
         $total,
     ]);
@@ -709,15 +1000,24 @@ function app_login(array $body): array
 {
     $email = strtolower(trim((string) ($body['email'] ?? '')));
     $password = (string) ($body['password'] ?? '');
+    app_check_rate_limit('admin', $email);
     $stmt = app_pdo()->prepare('SELECT id, name, email, password_hash, role FROM users WHERE LOWER(email) = ? AND active = 1 LIMIT 1');
     $stmt->execute([$email]);
     $user = $stmt->fetch();
 
     if (!$user || !password_verify($password, $user['password_hash'])) {
+        app_record_rate_limit('admin', $email, false);
         app_json_response(['ok' => false, 'message' => 'Identifiants invalides.'], 401);
     }
+    if (app_is_production() && password_verify('ChangeMe123!', $user['password_hash'])) {
+        app_record_rate_limit('admin', $email, false);
+        app_json_response(['ok' => false, 'message' => 'Mot de passe de demonstration refuse en production.'], 403);
+    }
+    app_record_rate_limit('admin', $email, true);
 
     $token = bin2hex(random_bytes(24));
+    $createdAt = date('c');
+    $expiresAt = date('c', time() + app_session_ttl_seconds());
     $sessions = app_sessions();
     $sessions[$token] = [
         'user_id' => (int) $user['id'],
@@ -725,14 +1025,15 @@ function app_login(array $body): array
         'email' => $user['email'],
         'role' => $user['role'],
         'permissions' => app_role_permissions($user['role']),
-        'created_at' => date('c'),
+        'created_at' => $createdAt,
+        'expires_at' => $expiresAt,
     ];
     app_save_sessions($sessions);
 
     return ['token' => $token, 'user' => $sessions[$token]];
 }
 
-function app_admin_summary(): array
+function app_admin_summary(?array $user = null): array
 {
     $pdo = app_pdo();
     $today = date('Y-m-d');
@@ -746,18 +1047,147 @@ function app_admin_summary(): array
         'payments_paid_today' => (int) $pdo->query("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'paid' AND DATE(paid_at) = '{$today}'")->fetchColumn(),
     ];
 
-    return ['summary' => $summary, 'orders' => app_orders('', 25), 'delivery_staff' => app_delivery_staff()];
+    $response = ['summary' => $summary, 'orders' => app_orders('', 25), 'delivery_staff' => app_delivery_staff()];
+    if ($user !== null && !empty(app_role_permissions((string) ($user['role'] ?? ''))['can_view_stats'])) {
+        $response['checks'] = app_system_checks();
+    }
+
+    return $response;
+}
+
+function app_system_checks(): array
+{
+    $checks = [];
+    $provider = app_notification_provider('whatsapp');
+    $hasDefaultUserPasswords = app_has_default_user_passwords();
+    $providerReady = match ($provider) {
+        'webhook' => app_env('NOTIFICATION_WEBHOOK_URL') !== '',
+        'twilio' => app_env('TWILIO_ACCOUNT_SID') !== '' && app_env('TWILIO_AUTH_TOKEN') !== '' && app_env('TWILIO_WHATSAPP_FROM') !== '',
+        'meta' => app_env('META_WHATSAPP_PHONE_NUMBER_ID') !== '' && app_env('META_WHATSAPP_ACCESS_TOKEN') !== '',
+        default => false,
+    };
+
+    $checks[] = [
+        'key' => 'app_env',
+        'label' => 'Mode application',
+        'status' => app_env('APP_ENV', 'local') === 'production' ? 'ok' : 'warning',
+        'message' => app_env('APP_ENV', 'local') === 'production' ? 'APP_ENV=production.' : 'APP_ENV est encore en mode local.',
+    ];
+    $checks[] = [
+        'key' => 'notifications',
+        'label' => 'Fournisseur notifications',
+        'status' => $providerReady ? 'ok' : 'warning',
+        'message' => $providerReady ? "Fournisseur {$provider} configure." : 'Notifications automatiques non configurees ou incompletes.',
+    ];
+    $checks[] = [
+        'key' => 'delivery_code',
+        'label' => 'Code livreur par defaut',
+        'status' => app_env('DELIVERY_DEFAULT_CODE', '1234') !== '1234' ? 'ok' : 'warning',
+        'message' => app_env('DELIVERY_DEFAULT_CODE', '1234') !== '1234' ? 'Code livreur par defaut personnalise.' : 'DELIVERY_DEFAULT_CODE utilise encore 1234.',
+    ];
+    $checks[] = [
+        'key' => 'default_passwords',
+        'label' => 'Mots de passe demo',
+        'status' => $hasDefaultUserPasswords ? 'warning' : 'ok',
+        'message' => $hasDefaultUserPasswords
+            ? (app_is_production() ? 'Bloquant: au moins un compte utilise encore ChangeMe123!.' : 'Au moins un compte utilise encore ChangeMe123!.')
+            : 'Aucun mot de passe demo detecte.',
+    ];
+    $checks[] = [
+        'key' => 'production_lock',
+        'label' => 'Verrouillage production',
+        'status' => app_is_production() ? 'ok' : 'warning',
+        'message' => app_is_production()
+            ? 'Les acces de demonstration sont refuses automatiquement.'
+            : 'Le verrouillage strict sera actif quand APP_ENV=production.',
+    ];
+    $checks[] = [
+        'key' => 'session_ttl',
+        'label' => 'Expiration sessions',
+        'status' => app_session_ttl_seconds() <= 12 * 3600 ? 'ok' : 'warning',
+        'message' => 'Sessions admin valides pendant ' . (int) app_env('SESSION_TTL_HOURS', '12') . ' heure(s).',
+    ];
+    $checks[] = [
+        'key' => 'rate_limit',
+        'label' => 'Limitation connexions',
+        'status' => (int) app_env('AUTH_MAX_ATTEMPTS', '5') <= 5 ? 'ok' : 'warning',
+        'message' => 'Blocage apres ' . (int) app_env('AUTH_MAX_ATTEMPTS', '5') . ' echec(s) pendant ' . (int) app_env('AUTH_LOCK_MINUTES', '15') . ' minute(s).',
+    ];
+    $checks[] = [
+        'key' => 'storage',
+        'label' => 'Dossiers ecriture',
+        'status' => app_writable_path(APP_ROOT . '/storage') && app_writable_path(UPLOAD_ROOT) ? 'ok' : 'warning',
+        'message' => app_writable_path(APP_ROOT . '/storage') && app_writable_path(UPLOAD_ROOT) ? 'Storage et uploads accessibles.' : 'Verifier les droits de storage/ et uploads/menu.',
+    ];
+
+    return $checks;
+}
+
+function app_has_default_user_passwords(): bool
+{
+    $rows = app_pdo()->query('SELECT password_hash FROM users WHERE active = 1')->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($rows as $hash) {
+        if (password_verify('ChangeMe123!', (string) $hash)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function app_writable_path(string $path): bool
+{
+    return is_dir($path) ? is_writable($path) : is_writable(dirname($path));
 }
 
 function app_admin_users(): array
 {
-    $rows = app_pdo()->query('SELECT id, name, email, role, active, created_at FROM users ORDER BY active DESC, role, name')->fetchAll();
+    $rows = app_pdo()->query('SELECT id, name, email, password_hash, role, active, created_at FROM users ORDER BY active DESC, role, name')->fetchAll();
 
     return array_map(function (array $row): array {
         $row['id'] = (int) $row['id'];
         $row['active'] = (bool) $row['active'];
+        $row['uses_demo_password'] = password_verify('ChangeMe123!', (string) $row['password_hash']);
+        unset($row['password_hash']);
         return $row;
     }, $rows);
+}
+
+function app_audit_log(?array $user, string $action, string $entity, ?int $entityId = null, array $details = []): void
+{
+    $stmt = app_pdo()->prepare(
+        'INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, ip_address)
+         VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    $stmt->execute([
+        isset($user['user_id']) ? (int) $user['user_id'] : null,
+        isset($user['name']) ? (string) $user['name'] : null,
+        substr($action, 0, 80),
+        substr($entity, 0, 80),
+        $entityId,
+        $details === [] ? null : json_encode($details, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        app_client_ip(),
+    ]);
+}
+
+function app_audit_logs(int $limit = 80): array
+{
+    $stmt = app_pdo()->prepare(
+        'SELECT id, user_id, user_name, action, entity, entity_id, details, ip_address, created_at
+         FROM audit_logs
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?'
+    );
+    $stmt->bindValue(1, max(1, min(200, $limit)), PDO::PARAM_INT);
+    $stmt->execute();
+
+    return array_map(function (array $row): array {
+        $row['id'] = (int) $row['id'];
+        $row['user_id'] = $row['user_id'] === null ? null : (int) $row['user_id'];
+        $row['entity_id'] = $row['entity_id'] === null ? null : (int) $row['entity_id'];
+        $decoded = json_decode((string) ($row['details'] ?? ''), true);
+        $row['details'] = is_array($decoded) ? $decoded : [];
+        return $row;
+    }, $stmt->fetchAll());
 }
 
 function app_contact_messages(int $limit = 50): array
@@ -889,11 +1319,23 @@ function app_delivery_staff(): array
     }, $stmt->fetchAll());
 }
 
+function app_delivery_staff_one(int $id): array
+{
+    foreach (app_delivery_staff() as $driver) {
+        if ((int) $driver['id'] === $id) {
+            return $driver;
+        }
+    }
+
+    app_json_response(['ok' => false, 'message' => 'Livreur introuvable.'], 404);
+}
+
 function app_save_delivery_staff(array $body): array
 {
     $id = (int) ($body['id'] ?? 0);
     $name = trim((string) ($body['name'] ?? ''));
     $phone = trim((string) ($body['phone'] ?? ''));
+    $accessCode = trim((string) ($body['access_code'] ?? ''));
     $status = (string) ($body['status'] ?? 'available');
     $active = !empty($body['active']) ? 1 : 0;
 
@@ -902,14 +1344,32 @@ function app_save_delivery_staff(array $body): array
     }
 
     if ($id > 0) {
-        $stmt = app_pdo()->prepare('UPDATE delivery_staff SET name = ?, phone = ?, status = ?, active = ? WHERE id = ?');
-        $stmt->execute([$name, $phone, $status, $active, $id]);
+        if ($accessCode !== '') {
+            if (strlen($accessCode) < 4) {
+                app_json_response(['ok' => false, 'message' => 'Le code livreur doit contenir au moins 4 caracteres.'], 422);
+            }
+            $stmt = app_pdo()->prepare('UPDATE delivery_staff SET name = ?, phone = ?, access_code_hash = ?, status = ?, active = ? WHERE id = ?');
+            $stmt->execute([$name, $phone, password_hash($accessCode, PASSWORD_DEFAULT), $status, $active, $id]);
+        } else {
+            $stmt = app_pdo()->prepare('UPDATE delivery_staff SET name = ?, phone = ?, status = ?, active = ? WHERE id = ?');
+            $stmt->execute([$name, $phone, $status, $active, $id]);
+        }
         if ($stmt->rowCount() === 0) {
-            app_json_response(['ok' => false, 'message' => 'Livreur introuvable.'], 404);
+            $exists = app_pdo()->prepare('SELECT COUNT(*) FROM delivery_staff WHERE id = ?');
+            $exists->execute([$id]);
+            if ((int) $exists->fetchColumn() === 0) {
+                app_json_response(['ok' => false, 'message' => 'Livreur introuvable.'], 404);
+            }
         }
     } else {
-        $stmt = app_pdo()->prepare('INSERT INTO delivery_staff (name, phone, status, active) VALUES (?, ?, ?, ?)');
-        $stmt->execute([$name, $phone, $status, $active]);
+        if ($accessCode === '') {
+            $accessCode = app_env('DELIVERY_DEFAULT_CODE', '1234');
+        }
+        if (strlen($accessCode) < 4) {
+            app_json_response(['ok' => false, 'message' => 'Le code livreur doit contenir au moins 4 caracteres.'], 422);
+        }
+        $stmt = app_pdo()->prepare('INSERT INTO delivery_staff (name, phone, access_code_hash, status, active) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$name, $phone, password_hash($accessCode, PASSWORD_DEFAULT), $status, $active]);
     }
 
     return app_delivery_staff();
@@ -1103,39 +1563,100 @@ function app_export_csv(string $type): void
 
     if ($type === 'notifications') {
         $rows = $pdo->query(
-            "SELECT n.created_at, o.number, n.channel, n.recipient, n.status, n.message
+            "SELECT n.created_at, o.number, n.channel, n.recipient, n.status, n.provider, n.provider_reference, n.message
              FROM notifications n
              LEFT JOIN orders o ON o.id = n.order_id
              ORDER BY n.created_at DESC"
         )->fetchAll(PDO::FETCH_NUM);
-        app_csv_response("chez-ketchup-notifications-{$date}.csv", ['date', 'commande', 'canal', 'destinataire', 'statut', 'message'], $rows);
+        app_csv_response("chez-ketchup-notifications-{$date}.csv", ['date', 'commande', 'canal', 'destinataire', 'statut', 'provider', 'reference_provider', 'message'], $rows);
     }
 
     app_json_response(['ok' => false, 'message' => 'Export inconnu.'], 404);
 }
 
-function app_pdf_response(string $filename, string $title, array $lines): void
+function app_pdf_response(string $filename, string $title, array $summary, array $stats): void
 {
-    $text = app_pdf_text($title);
-    $commands = "BT\n/F1 16 Tf\n50 800 Td\n(" . app_pdf_escape($text) . ") Tj\n";
-    $commands .= "/F1 10 Tf\n";
-    $y = 770;
+    $commands = '';
+    $commands .= app_pdf_rect(0, 0, 595, 842, '0.98 0.96 0.92');
+    $commands .= app_pdf_rect(0, 735, 595, 107, '0.78 0.04 0.08');
+    $commands .= app_pdf_rect(0, 720, 595, 16, '0.10 0.10 0.10');
+    $commands .= app_pdf_text_at($title, 42, 785, 24, 'F2', '1 1 1');
+    $commands .= app_pdf_text_at('Rapport de synthese - ' . date('d/m/Y H:i'), 42, 762, 10, 'F1', '1 1 1');
+    $commands .= app_pdf_text_at(app_env('APP_URL', 'http://localhost/boucherketchup'), 42, 745, 9, 'F1', '1 1 1');
 
-    foreach ($lines as $line) {
-        if ($y < 60) {
-            break;
-        }
-        $commands .= "50 {$y} Td\n(" . app_pdf_escape(app_pdf_text((string) $line)) . ") Tj\n-50 -" . $y . " Td\n";
-        $y -= 16;
+    $cards = [
+        ['CA aujourd hui', app_pdf_money((int) $summary['revenue_today'])],
+        ['Commandes jour', (string) $summary['orders_today']],
+        ['En attente', (string) $summary['pending']],
+        ['Paiements attente', (string) $summary['payments_pending']],
+    ];
+    $x = 42;
+    foreach ($cards as $card) {
+        $commands .= app_pdf_rect($x, 646, 118, 55, '1 1 1');
+        $commands .= app_pdf_rect($x, 646, 118, 4, '0.93 0.63 0.08');
+        $commands .= app_pdf_text_at($card[0], $x + 12, 681, 8, 'F1', '0.35 0.35 0.35');
+        $commands .= app_pdf_text_at($card[1], $x + 12, 660, 15, 'F2', '0.10 0.10 0.10');
+        $x += 128;
     }
-    $commands .= "ET";
+
+    $commands .= app_pdf_text_at('Activite des 7 derniers jours', 42, 610, 14, 'F2', '0.10 0.10 0.10');
+    $commands .= app_pdf_rect(42, 465, 230, 125, '1 1 1');
+    $maxRevenue = app_pdf_max_value($stats['revenue_by_day'], 'revenue');
+    $barX = 58;
+    foreach (array_slice($stats['revenue_by_day'], -7) as $row) {
+        $height = max(4, (int) round(((int) $row['revenue'] / $maxRevenue) * 82));
+        $commands .= app_pdf_rect($barX, 485, 18, $height, '0.78 0.04 0.08');
+        $commands .= app_pdf_text_at(date('d/m', strtotime((string) $row['day'])), $barX - 3, 474, 6, 'F1', '0.35 0.35 0.35');
+        $barX += 29;
+    }
+
+    $commands .= app_pdf_text_at('Top plats', 310, 610, 14, 'F2', '0.10 0.10 0.10');
+    $commands .= app_pdf_rect(310, 465, 243, 125, '1 1 1');
+    $y = 568;
+    foreach (array_slice($stats['top_items'], 0, 5) as $item) {
+        $commands .= app_pdf_text_at(app_pdf_short_text((string) $item['name'], 28), 324, $y, 8, 'F2', '0.10 0.10 0.10');
+        $commands .= app_pdf_text_at($item['quantity'] . ' ventes - ' . app_pdf_money((int) $item['revenue']), 470, $y, 8, 'F1', '0.35 0.35 0.35');
+        $commands .= app_pdf_line(324, $y - 8, 538, $y - 8, '0.88 0.88 0.88');
+        $y -= 21;
+    }
+
+    $commands .= app_pdf_text_at('Paiements', 42, 420, 14, 'F2', '0.10 0.10 0.10');
+    $commands .= app_pdf_rect(42, 250, 511, 150, '1 1 1');
+    $commands .= app_pdf_rect(42, 374, 511, 26, '0.10 0.10 0.10');
+    $commands .= app_pdf_text_at('Methode', 58, 383, 8, 'F2', '1 1 1');
+    $commands .= app_pdf_text_at('Statut', 210, 383, 8, 'F2', '1 1 1');
+    $commands .= app_pdf_text_at('Nombre', 350, 383, 8, 'F2', '1 1 1');
+    $commands .= app_pdf_text_at('Montant', 455, 383, 8, 'F2', '1 1 1');
+    $y = 354;
+    foreach (array_slice($stats['payment_breakdown'], 0, 6) as $payment) {
+        $commands .= app_pdf_text_at((string) $payment['method'], 58, $y, 9, 'F1', '0.10 0.10 0.10');
+        $commands .= app_pdf_text_at((string) $payment['status'], 210, $y, 9, 'F1', '0.10 0.10 0.10');
+        $commands .= app_pdf_text_at((string) $payment['count'], 350, $y, 9, 'F1', '0.10 0.10 0.10');
+        $commands .= app_pdf_text_at(app_pdf_money((int) $payment['amount']), 455, $y, 9, 'F1', '0.10 0.10 0.10');
+        $commands .= app_pdf_line(58, $y - 9, 535, $y - 9, '0.88 0.88 0.88');
+        $y -= 20;
+    }
+
+    $commands .= app_pdf_text_at('Categories', 42, 210, 14, 'F2', '0.10 0.10 0.10');
+    $y = 188;
+    $maxCategoryRevenue = app_pdf_max_value($stats['category_sales'], 'revenue');
+    foreach (array_slice($stats['category_sales'], 0, 6) as $category) {
+        $width = max(6, (int) round(((int) $category['revenue'] / $maxCategoryRevenue) * 260));
+        $commands .= app_pdf_text_at(app_pdf_short_text((string) $category['category'], 22), 42, $y, 8, 'F1', '0.10 0.10 0.10');
+        $commands .= app_pdf_rect(150, $y - 5, $width, 8, '0.93 0.63 0.08');
+        $commands .= app_pdf_text_at(app_pdf_money((int) $category['revenue']), 425, $y, 8, 'F1', '0.35 0.35 0.35');
+        $y -= 18;
+    }
+
+    $commands .= app_pdf_text_at('Chez Ketchup - Export genere depuis le back-office', 42, 42, 8, 'F1', '0.45 0.45 0.45');
 
     $objects = [
         "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
         "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>\nendobj\n",
         "4 0 obj\n<< /Length " . strlen($commands) . " >>\nstream\n{$commands}\nendstream\nendobj\n",
         "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        "6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n",
     ];
 
     $pdf = "%PDF-1.4\n";
@@ -1171,6 +1692,38 @@ function app_pdf_escape(string $value): string
     return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $value);
 }
 
+function app_pdf_text_at(string $text, int $x, int $y, int $size = 10, string $font = 'F1', string $color = '0 0 0'): string
+{
+    return "{$color} rg\nBT\n/{$font} {$size} Tf\n{$x} {$y} Td\n(" . app_pdf_escape(app_pdf_text($text)) . ") Tj\nET\n";
+}
+
+function app_pdf_short_text(string $text, int $max): string
+{
+    $plain = app_pdf_text($text);
+    return strlen($plain) > $max ? substr($plain, 0, $max - 3) . '...' : $plain;
+}
+
+function app_pdf_max_value(array $rows, string $key): int
+{
+    $values = array_map(fn ($row) => (int) ($row[$key] ?? 0), $rows);
+    return max(1, ...$values);
+}
+
+function app_pdf_rect(int $x, int $y, int $width, int $height, string $color): string
+{
+    return "{$color} rg\n{$x} {$y} {$width} {$height} re f\n";
+}
+
+function app_pdf_line(int $x1, int $y1, int $x2, int $y2, string $color): string
+{
+    return "{$color} RG\n0.5 w\n{$x1} {$y1} m\n{$x2} {$y2} l\nS\n";
+}
+
+function app_pdf_money(int $value): string
+{
+    return number_format($value, 0, ',', ' ') . ' CFA';
+}
+
 function app_export_pdf(string $type): void
 {
     if ($type !== 'summary') {
@@ -1179,27 +1732,8 @@ function app_export_pdf(string $type): void
 
     $stats = app_admin_stats();
     $summary = app_admin_summary()['summary'];
-    $lines = [
-        'Date: ' . date('d/m/Y H:i'),
-        'CA aujourd hui: ' . $summary['revenue_today'] . ' CFA',
-        'Commandes aujourd hui: ' . $summary['orders_today'],
-        'Commandes en attente: ' . $summary['pending'],
-        'Paiements en attente: ' . $summary['payments_pending'],
-        '',
-        'Top plats',
-    ];
 
-    foreach (array_slice($stats['top_items'], 0, 10) as $item) {
-        $lines[] = $item['name'] . ' - ' . $item['quantity'] . ' ventes - ' . $item['revenue'] . ' CFA';
-    }
-
-    $lines[] = '';
-    $lines[] = 'Paiements';
-    foreach ($stats['payment_breakdown'] as $payment) {
-        $lines[] = $payment['method'] . ' / ' . $payment['status'] . ' - ' . $payment['count'] . ' - ' . $payment['amount'] . ' CFA';
-    }
-
-    app_pdf_response('chez-ketchup-rapport-' . date('Ymd') . '.pdf', 'Rapport Chez Ketchup', $lines);
+    app_pdf_response('chez-ketchup-rapport-' . date('Ymd') . '.pdf', 'Rapport Chez Ketchup', $summary, $stats);
 }
 
 function app_notification_templates(array $order): array
@@ -1242,12 +1776,227 @@ function app_queue_notification(int $orderId, string $template, string $channel 
     }
 
     $pdo = app_pdo();
+    $provider = app_notification_provider($channel);
     $stmt = $pdo->prepare('INSERT INTO notifications (order_id, channel, recipient, message, status, provider) VALUES (?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$orderId, $channel, $order['phone'], $templates[$template], 'queued', 'manual']);
-    $notification = app_notification((int) $pdo->lastInsertId());
+    $stmt->execute([$orderId, $channel, $order['phone'], $templates[$template], 'queued', $provider]);
+    $notificationId = (int) $pdo->lastInsertId();
+
+    if ($provider !== 'manual') {
+        app_send_notification($notificationId);
+    }
+
+    $notification = app_notification($notificationId);
     $notification['whatsapp_url'] = app_whatsapp_url($notification['recipient'], $notification['message']);
 
     return $notification;
+}
+
+function app_queue_test_notification(array $body): array
+{
+    $channel = (string) ($body['channel'] ?? 'whatsapp');
+    $recipient = trim((string) ($body['recipient'] ?? ''));
+    $message = trim((string) ($body['message'] ?? ''));
+
+    if (!in_array($channel, ['whatsapp', 'sms'], true)) {
+        app_json_response(['ok' => false, 'message' => 'Canal invalide.'], 422);
+    }
+    if ($recipient === '' || $message === '') {
+        app_json_response(['ok' => false, 'message' => 'Destinataire et message de test requis.'], 422);
+    }
+
+    $provider = app_notification_provider($channel);
+    $stmt = app_pdo()->prepare('INSERT INTO notifications (order_id, channel, recipient, message, status, provider) VALUES (NULL, ?, ?, ?, ?, ?)');
+    $stmt->execute([$channel, $recipient, $message, 'queued', $provider]);
+    $notificationId = (int) app_pdo()->lastInsertId();
+
+    if ($provider !== 'manual') {
+        app_send_notification($notificationId);
+    }
+
+    $notification = app_notification($notificationId);
+    $notification['whatsapp_url'] = app_whatsapp_url($notification['recipient'], $notification['message']);
+
+    return $notification;
+}
+
+function app_notification_provider(string $channel): string
+{
+    $specific = strtoupper($channel) . '_PROVIDER';
+    $provider = strtolower(app_env($specific, app_env('NOTIFICATION_PROVIDER', 'manual')));
+    return in_array($provider, ['manual', 'webhook', 'twilio', 'meta'], true) ? $provider : 'manual';
+}
+
+function app_send_notification(int $id): void
+{
+    $notification = app_notification($id);
+    $provider = (string) ($notification['provider'] ?: app_notification_provider((string) $notification['channel']));
+
+    try {
+        $reference = match ($provider) {
+            'webhook' => app_send_notification_webhook($notification),
+            'twilio' => app_send_notification_twilio($notification),
+            'meta' => app_send_notification_meta($notification),
+            default => '',
+        };
+        if ($reference === '') {
+            return;
+        }
+        app_update_notification_delivery($id, 'sent', $provider, $reference);
+    } catch (Throwable $error) {
+        app_update_notification_delivery($id, 'failed', $provider, 'ERR-' . substr(md5($error->getMessage()), 0, 12));
+    }
+}
+
+function app_update_notification_delivery(int $id, string $status, string $provider, string $reference = ''): void
+{
+    $sentSql = $status === 'sent' ? ', sent_at = NOW()' : ', sent_at = NULL';
+    $stmt = app_pdo()->prepare("UPDATE notifications SET status = ?, provider = ?, provider_reference = ? {$sentSql} WHERE id = ?");
+    $stmt->execute([$status, $provider, $reference !== '' ? substr($reference, 0, 120) : null, $id]);
+}
+
+function app_send_notification_webhook(array $notification): string
+{
+    $url = app_env('NOTIFICATION_WEBHOOK_URL');
+    if ($url === '') {
+        throw new RuntimeException('NOTIFICATION_WEBHOOK_URL manquant.');
+    }
+
+    $payload = [
+        'channel' => $notification['channel'],
+        'recipient' => app_notification_phone((string) $notification['recipient']),
+        'message' => $notification['message'],
+        'order_number' => $notification['order_number'] ?? null,
+    ];
+    $response = app_http_request('POST', $url, ['Content-Type: application/json'], json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}');
+    if ($response['status'] < 200 || $response['status'] >= 300) {
+        throw new RuntimeException('Webhook notification refusee: HTTP ' . $response['status']);
+    }
+
+    $decoded = json_decode($response['body'], true);
+    return is_array($decoded) ? (string) ($decoded['id'] ?? $decoded['reference'] ?? 'webhook-' . date('YmdHis')) : 'webhook-' . date('YmdHis');
+}
+
+function app_send_notification_twilio(array $notification): string
+{
+    $sid = app_env('TWILIO_ACCOUNT_SID');
+    $token = app_env('TWILIO_AUTH_TOKEN');
+    $from = app_env($notification['channel'] === 'whatsapp' ? 'TWILIO_WHATSAPP_FROM' : 'TWILIO_SMS_FROM');
+    if ($sid === '' || $token === '' || $from === '') {
+        throw new RuntimeException('Configuration Twilio incomplete.');
+    }
+
+    $to = app_notification_phone((string) $notification['recipient']);
+    if ($notification['channel'] === 'whatsapp' && !str_starts_with($to, 'whatsapp:')) {
+        $to = 'whatsapp:' . $to;
+    }
+
+    $body = http_build_query(['From' => $from, 'To' => $to, 'Body' => $notification['message']]);
+    $headers = [
+        'Content-Type: application/x-www-form-urlencoded',
+        'Authorization: Basic ' . base64_encode($sid . ':' . $token),
+    ];
+    $response = app_http_request('POST', "https://api.twilio.com/2010-04-01/Accounts/{$sid}/Messages.json", $headers, $body);
+    if ($response['status'] < 200 || $response['status'] >= 300) {
+        throw new RuntimeException('Twilio notification refusee: HTTP ' . $response['status']);
+    }
+
+    $decoded = json_decode($response['body'], true);
+    return is_array($decoded) ? (string) ($decoded['sid'] ?? 'twilio-' . date('YmdHis')) : 'twilio-' . date('YmdHis');
+}
+
+function app_send_notification_meta(array $notification): string
+{
+    if ($notification['channel'] !== 'whatsapp') {
+        throw new RuntimeException('Meta WhatsApp ne supporte pas le canal SMS.');
+    }
+
+    $phoneNumberId = app_env('META_WHATSAPP_PHONE_NUMBER_ID');
+    $token = app_env('META_WHATSAPP_ACCESS_TOKEN');
+    $version = app_env('META_WHATSAPP_API_VERSION', 'v19.0');
+    if ($phoneNumberId === '' || $token === '') {
+        throw new RuntimeException('Configuration Meta WhatsApp incomplete.');
+    }
+
+    $payload = [
+        'messaging_product' => 'whatsapp',
+        'to' => ltrim(app_notification_phone((string) $notification['recipient']), '+'),
+        'type' => 'text',
+        'text' => ['preview_url' => false, 'body' => $notification['message']],
+    ];
+    $headers = [
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . $token,
+    ];
+    $url = "https://graph.facebook.com/{$version}/{$phoneNumberId}/messages";
+    $response = app_http_request('POST', $url, $headers, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}');
+    if ($response['status'] < 200 || $response['status'] >= 300) {
+        throw new RuntimeException('Meta WhatsApp notification refusee: HTTP ' . $response['status']);
+    }
+
+    $decoded = json_decode($response['body'], true);
+    return is_array($decoded) ? (string) ($decoded['messages'][0]['id'] ?? 'meta-' . date('YmdHis')) : 'meta-' . date('YmdHis');
+}
+
+function app_notification_phone(string $phone): string
+{
+    $trimmed = trim($phone);
+    if (str_starts_with($trimmed, 'whatsapp:')) {
+        return $trimmed;
+    }
+    $digits = preg_replace('/\D+/', '', $trimmed) ?: '';
+    if (str_starts_with($digits, '00')) {
+        $digits = substr($digits, 2);
+    }
+    if (strlen($digits) === 9) {
+        $digits = '221' . $digits;
+    }
+    return '+' . $digits;
+}
+
+function app_http_request(string $method, string $url, array $headers, string $body): array
+{
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => $method,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        $responseBody = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        if ($responseBody === false) {
+            throw new RuntimeException($error ?: 'Requete HTTP impossible.');
+        }
+        return ['status' => $status, 'body' => (string) $responseBody];
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'method' => $method,
+            'header' => implode("\r\n", $headers),
+            'content' => $body,
+            'timeout' => 10,
+            'ignore_errors' => true,
+        ],
+    ]);
+    $responseBody = file_get_contents($url, false, $context);
+    if ($responseBody === false) {
+        throw new RuntimeException('Requete HTTP impossible.');
+    }
+
+    $status = 0;
+    foreach ($http_response_header ?? [] as $header) {
+        if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $matches)) {
+            $status = (int) $matches[1];
+            break;
+        }
+    }
+
+    return ['status' => $status, 'body' => $responseBody];
 }
 
 function app_notification(int $id): array

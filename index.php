@@ -7,6 +7,7 @@ declare(strict_types=1);
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chez Ketchup - Commande en ligne à Dakar</title>
   <meta name="description" content="Commandez en ligne chez Chez Ketchup à Yoff, Dakar. Fast Food, Pizzeria, Gastro, Lounge et livraison.">
+  <link rel="icon" href="assets/img/chez-ketchup-logo.jpeg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
@@ -15,13 +16,14 @@ declare(strict_types=1);
 <body>
   <header class="topbar">
     <button class="brand" data-page="home" aria-label="Accueil Chez Ketchup">
-      <span class="brand-mark">CK</span>
+      <img class="brand-logo" src="assets/img/chez-ketchup-logo.jpeg" alt="" loading="eager">
       <span>Chez <strong>Ketchup</strong></span>
     </button>
     <nav class="nav" aria-label="Navigation principale">
       <button data-page="home" class="active">Accueil</button>
       <button data-page="menu">Menu</button>
       <button data-page="tracking">Suivi</button>
+      <button data-page="driver">Livreur</button>
       <button data-page="admin">Gestion</button>
       <button data-page="contact">Contact</button>
     </nav>
@@ -31,6 +33,9 @@ declare(strict_types=1);
   <main>
     <section class="page active" id="page-home">
       <div class="hero">
+        <video class="hero-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
+          <source src="assets/video/hero-chez-ketchup.mp4" type="video/mp4">
+        </video>
         <div class="hero-copy">
           <p class="eyebrow"><span></span> Yoff, Dakar - Ouvert tous les jours</p>
           <h1>Le goût de Dakar dans votre assiette</h1>
@@ -86,6 +91,22 @@ declare(strict_types=1);
       </section>
     </section>
 
+    <section class="page" id="page-driver">
+      <section class="section narrow">
+        <h2>Espace livreur</h2>
+        <form class="panel form" id="driver-login-form">
+          <label>Telephone livreur
+            <input type="tel" name="phone" placeholder="+221..." required>
+          </label>
+          <label>Code d'acces
+            <input type="password" name="code" inputmode="numeric" minlength="4" required>
+          </label>
+          <button class="primary" type="submit">Voir mes courses</button>
+        </form>
+        <div class="stack" id="driver-dashboard"></div>
+      </section>
+    </section>
+
     <section class="page" id="page-admin">
       <section class="admin-shell">
         <aside class="admin-side">
@@ -98,6 +119,7 @@ declare(strict_types=1);
           <button data-admin-tab="delivery">Livreurs</button>
           <button data-admin-tab="stats">Statistiques</button>
           <button data-admin-tab="notifications">Notifications</button>
+          <button data-admin-tab="audit" data-permission="can_view_stats">Journal</button>
           <button data-admin-tab="clients">Clients</button>
           <button data-admin-tab="messages">Messages</button>
           <button data-admin-tab="users" data-permission="can_manage_users">Utilisateurs</button>
@@ -109,7 +131,7 @@ declare(strict_types=1);
               <input type="email" name="email" value="admin@chezketchup.com" required>
             </label>
             <label>Mot de passe
-              <input type="password" name="password" value="ChangeMe123!" required>
+              <input type="password" name="password" required>
             </label>
             <button class="primary" type="submit">Se connecter</button>
           </form>
@@ -180,6 +202,9 @@ declare(strict_types=1);
                   <label>Téléphone
                     <input name="phone" type="tel" required>
                   </label>
+                  <label>Code d'accÃ¨s
+                    <input name="access_code" type="password" minlength="4" placeholder="Laisser vide pour conserver">
+                  </label>
                   <label>Statut
                     <select name="status">
                       <option value="available">Disponible</option>
@@ -193,6 +218,7 @@ declare(strict_types=1);
                 </div>
                 <div class="actions">
                   <button class="primary" type="submit">Enregistrer</button>
+                  <button class="secondary" type="button" data-generate-delivery-code>Generer un code</button>
                   <button class="secondary" type="button" id="delivery-form-reset">Annuler</button>
                 </div>
               </form>
@@ -233,9 +259,27 @@ declare(strict_types=1);
               </div>
             </div>
             <div class="admin-tab" id="admin-notifications">
+              <form class="panel form menu-editor" id="notification-test-form">
+                <h3>Test fournisseur</h3>
+                <div class="form-grid">
+                  <label>Canal
+                    <select name="channel">
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="sms">SMS</option>
+                    </select>
+                  </label>
+                  <label>Destinataire
+                    <input name="recipient" type="tel" placeholder="+221..." required>
+                  </label>
+                </div>
+                <label>Message
+                  <textarea name="message" rows="3" required>Test Chez Ketchup: notification automatique bien recue.</textarea>
+                </label>
+                <button class="primary" type="submit">Envoyer le test</button>
+              </form>
               <div class="panel">
                 <h3>Notifications WhatsApp / SMS</h3>
-                <p class="muted">Préparez les messages clients. L'envoi automatique sera branché ensuite via Twilio, Meta WhatsApp ou un agrégateur local.</p>
+                <p class="muted">Préparez les messages clients. L'envoi automatique peut maintenant passer par webhook, Twilio ou Meta WhatsApp selon la configuration.</p>
                 <div class="table-wrap"><table id="notifications-table"></table></div>
               </div>
             </div>
@@ -243,6 +287,15 @@ declare(strict_types=1);
               <div class="panel">
                 <h3>Clients</h3>
                 <div class="table-wrap"><table id="clients-table"></table></div>
+              </div>
+            </div>
+            <div class="admin-tab" id="admin-audit">
+              <div class="panel">
+                <div class="section-head">
+                  <h3>Journal d'audit</h3>
+                  <button class="secondary small" data-audit-refresh>Rafraichir</button>
+                </div>
+                <div class="table-wrap"><table id="audit-table"></table></div>
               </div>
             </div>
             <div class="admin-tab" id="admin-messages">
@@ -278,6 +331,7 @@ declare(strict_types=1);
                 </div>
                 <div class="actions">
                   <button class="primary" type="submit">Enregistrer</button>
+                  <button class="secondary" type="button" data-generate-user-password>Generer un mot de passe</button>
                   <button class="secondary" type="button" id="user-form-reset">Annuler</button>
                 </div>
               </form>
@@ -322,8 +376,8 @@ declare(strict_types=1);
     <form class="checkout" id="checkout-form">
       <label>Nom complet <input name="name" required></label>
       <label>Téléphone <input name="phone" type="tel" required></label>
-      <label>Adresse <input name="address" required></label>
-      <label>Note spéciale <textarea name="note" rows="2" placeholder="Sans oignons, sauce à part..."></textarea></label>
+      <label>Adresse <input name="address" placeholder="Quartier, rue ou point de repere"></label>
+      <label>Note spéciale <textarea name="note" rows="1" placeholder="Sans oignons, sauce à part..."></textarea></label>
       <div class="two">
         <label>Mode
           <select name="fulfillment">

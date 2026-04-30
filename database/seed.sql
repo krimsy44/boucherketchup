@@ -11,11 +11,11 @@ INSERT INTO categories (id, name, sort_order) VALUES
 ('repas', 'Repas', 80);
 
 INSERT INTO users (name, email, password_hash, role) VALUES
-('Super Admin', 'admin@chezketchup.com', '$2y$10$pwlt9JaM33YLDji7ztUfO.RFDShg9TRujZFQdPoN9C1PIoIV8jEWG', 'super_admin'),
-('Gérant', 'gerant@chezketchup.com', '$2y$10$pwlt9JaM33YLDji7ztUfO.RFDShg9TRujZFQdPoN9C1PIoIV8jEWG', 'manager'),
-('Caisse', 'caisse@chezketchup.com', '$2y$10$pwlt9JaM33YLDji7ztUfO.RFDShg9TRujZFQdPoN9C1PIoIV8jEWG', 'cashier');
+('Super Admin', 'admin@chezketchup.com', '$2y$10$qC/rMBBCaCA2CmslEwDI9enGojnVII0N/gPutM1l8yfSOyGePWZVC', 'super_admin'),
+('Gérant', 'gerant@chezketchup.com', '$2y$10$qC/rMBBCaCA2CmslEwDI9enGojnVII0N/gPutM1l8yfSOyGePWZVC', 'manager'),
+('Caisse', 'caisse@chezketchup.com', '$2y$10$qC/rMBBCaCA2CmslEwDI9enGojnVII0N/gPutM1l8yfSOyGePWZVC', 'cashier');
 
-INSERT INTO delivery_staff (name, phone, status) VALUES
-('Moussa Diop', '+221 77 400 10 10', 'available'),
-('Cheikh Fall', '+221 78 401 20 20', 'available'),
-('Abdou Sarr', '+221 76 402 30 30', 'absent');
+INSERT INTO delivery_staff (name, phone, access_code_hash, status) VALUES
+('Moussa Diop', '+221 77 400 10 10', '$2y$10$HLlW/8DVlaDduVURHxNJjeuOGMrNc0aO4ai.d9SENlItn/nZIQiWu', 'available'),
+('Cheikh Fall', '+221 78 401 20 20', '$2y$10$HLlW/8DVlaDduVURHxNJjeuOGMrNc0aO4ai.d9SENlItn/nZIQiWu', 'available'),
+('Abdou Sarr', '+221 76 402 30 30', '$2y$10$HLlW/8DVlaDduVURHxNJjeuOGMrNc0aO4ai.d9SENlItn/nZIQiWu', 'absent');

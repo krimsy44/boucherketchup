@@ -1,0 +1,26 @@
+# Deny access to sensitive files
+<FilesMatch "\.(env|json|md|sql|docx)$">
+  Deny from all
+</FilesMatch>
+
+# Allow manifest.webmanifest
+<Files "manifest.webmanifest">
+  Allow from all
+</Files>
+
+# Security headers
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Handle OPTIONS preflight for CORS
+RewriteEngine On
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^api/ - [R=204,L]
+
+# Force HTTPS in production
+# RewriteCond %{HTTPS} off
+# RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]

@@ -35,6 +35,10 @@ CREATE TABLE menu_items (
   available BOOLEAN NOT NULL DEFAULT TRUE,
   active BOOLEAN NOT NULL DEFAULT TRUE,
   popular BOOLEAN NOT NULL DEFAULT FALSE,
+  daily_special BOOLEAN NOT NULL DEFAULT FALSE,
+  stock_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  stock_qty INT NOT NULL DEFAULT 0,
+  low_stock_threshold INT NOT NULL DEFAULT 3,
   sort_order INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -69,7 +73,13 @@ CREATE TABLE orders (
   address VARCHAR(255) NOT NULL,
   note TEXT NULL,
   fulfillment ENUM('delivery', 'pickup') NOT NULL DEFAULT 'delivery',
+  delivery_zone_id BIGINT UNSIGNED NULL,
+  scheduled_at DATETIME NULL,
   status ENUM('pending', 'prep', 'delivery', 'done', 'cancelled') NOT NULL DEFAULT 'pending',
+  subtotal INT UNSIGNED NOT NULL DEFAULT 0,
+  delivery_fee INT UNSIGNED NOT NULL DEFAULT 0,
+  discount_total INT UNSIGNED NOT NULL DEFAULT 0,
+  promo_code VARCHAR(40) NULL,
   total INT UNSIGNED NOT NULL DEFAULT 0,
   delivery_staff_id BIGINT UNSIGNED NULL,
   cancellation_reason VARCHAR(255) NULL,
@@ -86,6 +96,7 @@ CREATE TABLE order_items (
   order_id BIGINT UNSIGNED NOT NULL,
   menu_item_id BIGINT UNSIGNED NULL,
   name VARCHAR(160) NOT NULL,
+  options_text TEXT NULL,
   quantity INT UNSIGNED NOT NULL,
   unit_price INT UNSIGNED NOT NULL,
   line_total INT UNSIGNED NOT NULL,
@@ -154,6 +165,79 @@ CREATE TABLE audit_logs (
   CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+<<<<<<< HEAD
+=======
+CREATE TABLE app_settings (
+  setting_key VARCHAR(80) PRIMARY KEY,
+  setting_value TEXT NULL,
+  updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE business_hours (
+  weekday TINYINT UNSIGNED PRIMARY KEY,
+  open_time TIME NULL,
+  close_time TIME NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE delivery_zones (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  fee INT UNSIGNED NOT NULL DEFAULT 0,
+  minimum_order INT UNSIGNED NOT NULL DEFAULT 0,
+  estimated_minutes INT UNSIGNED NOT NULL DEFAULT 45,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE menu_item_options (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  menu_item_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  price_delta INT NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_option_menu_item FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE
+);
+
+CREATE TABLE promo_codes (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(40) NOT NULL UNIQUE,
+  label VARCHAR(140) NOT NULL,
+  type ENUM('percent', 'fixed') NOT NULL DEFAULT 'fixed',
+  value INT UNSIGNED NOT NULL DEFAULT 0,
+  minimum_order INT UNSIGNED NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE customer_reviews (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  order_id BIGINT UNSIGNED NOT NULL,
+  rating TINYINT UNSIGNED NOT NULL,
+  comment TEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_review_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+
+ALTER TABLE promo_codes ADD COLUMN expires_at DATETIME NULL AFTER active;
+ALTER TABLE promo_codes ADD COLUMN max_uses INT UNSIGNED NULL AFTER expires_at;
+ALTER TABLE promo_codes ADD COLUMN used_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER max_uses;
+
+>>>>>>> 5f92b50 (mise a jour)
 CREATE INDEX idx_orders_status_created ON orders(status, created_at);
 CREATE INDEX idx_orders_phone ON orders(phone);
 CREATE INDEX idx_payments_status ON payments(status);
+CREATE INDEX idx_orders_customer ON orders(customer_id);
+CREATE INDEX idx_orders_delivery_staff ON orders(delivery_staff_id);
+CREATE INDEX idx_orders_delivery_zone ON orders(delivery_zone_id);
+CREATE INDEX idx_orders_created ON orders(created_at);
+CREATE INDEX idx_payments_order ON payments(order_id);
+CREATE INDEX idx_payments_reference ON payments(reference);
+CREATE INDEX idx_order_items_order ON order_items(order_id);
+CREATE INDEX idx_notifications_order ON notifications(order_id);
+CREATE INDEX idx_audit_logs_created ON audit_logs(created_at);
+CREATE INDEX idx_menu_items_category ON menu_items(category_id);
+CREATE INDEX idx_delivery_staff_phone ON delivery_staff(phone);

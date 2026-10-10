@@ -1,0 +1,7 @@
+# Allow image access but prevent PHP execution
+<FilesMatch "\.php$">
+  Deny from all
+</FilesMatch>
+
+# Disable PHP engine in this directory
+php_flag engine off

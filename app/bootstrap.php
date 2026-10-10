@@ -12,6 +12,9 @@ function app_json_response(array $payload, int $status = 200): void
 {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
+    header('Access-Control-Allow-Origin: ' . app_env('APP_URL', '*'));
+    header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
@@ -85,8 +88,13 @@ function app_pdo(): PDO
     $server->exec("CREATE DATABASE IF NOT EXISTS `{$database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
 
     $pdo = new PDO("mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4", $username, $password, $options);
-    app_install_schema($pdo);
-    app_seed_database($pdo);
+
+    $flagFile = APP_ROOT . '/storage/.db_installed';
+    if (!file_exists($flagFile)) {
+        app_install_schema($pdo);
+        app_seed_database($pdo);
+        file_put_contents($flagFile, date('c'));
+    }
 
     return $pdo;
 }
@@ -128,6 +136,7 @@ function app_install_schema(PDO $pdo): void
             available BOOLEAN NOT NULL DEFAULT TRUE,
             active BOOLEAN NOT NULL DEFAULT TRUE,
             popular BOOLEAN NOT NULL DEFAULT FALSE,
+            daily_special BOOLEAN NOT NULL DEFAULT FALSE,
             sort_order INT NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -237,6 +246,58 @@ function app_install_schema(PDO $pdo): void
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
         )",
+<<<<<<< HEAD
+=======
+        "CREATE TABLE IF NOT EXISTS app_settings (
+            setting_key VARCHAR(80) PRIMARY KEY,
+            setting_value TEXT NULL,
+            updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+        )",
+        "CREATE TABLE IF NOT EXISTS business_hours (
+            weekday TINYINT UNSIGNED PRIMARY KEY,
+            open_time TIME NULL,
+            close_time TIME NULL,
+            active BOOLEAN NOT NULL DEFAULT TRUE
+        )",
+        "CREATE TABLE IF NOT EXISTS delivery_zones (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(120) NOT NULL,
+            fee INT UNSIGNED NOT NULL DEFAULT 0,
+            minimum_order INT UNSIGNED NOT NULL DEFAULT 0,
+            estimated_minutes INT UNSIGNED NOT NULL DEFAULT 45,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            sort_order INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )",
+        "CREATE TABLE IF NOT EXISTS menu_item_options (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            menu_item_id BIGINT UNSIGNED NOT NULL,
+            name VARCHAR(120) NOT NULL,
+            price_delta INT NOT NULL DEFAULT 0,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            sort_order INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_option_menu_item FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE
+        )",
+        "CREATE TABLE IF NOT EXISTS promo_codes (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            code VARCHAR(40) NOT NULL UNIQUE,
+            label VARCHAR(140) NOT NULL,
+            type ENUM('percent', 'fixed') NOT NULL DEFAULT 'fixed',
+            value INT UNSIGNED NOT NULL DEFAULT 0,
+            minimum_order INT UNSIGNED NOT NULL DEFAULT 0,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )",
+        "CREATE TABLE IF NOT EXISTS customer_reviews (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            order_id BIGINT UNSIGNED NOT NULL,
+            rating TINYINT UNSIGNED NOT NULL,
+            comment TEXT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_review_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+        )",
+>>>>>>> 5f92b50 (mise a jour)
     ];
 
     foreach ($statements as $statement) {
@@ -244,10 +305,26 @@ function app_install_schema(PDO $pdo): void
     }
 
     app_ensure_column($pdo, 'menu_items', 'active', 'ALTER TABLE menu_items ADD active BOOLEAN NOT NULL DEFAULT TRUE AFTER available');
+    app_ensure_column($pdo, 'menu_items', 'daily_special', 'ALTER TABLE menu_items ADD daily_special BOOLEAN NOT NULL DEFAULT FALSE AFTER popular');
     app_ensure_column($pdo, 'payments', 'checkout_url', 'ALTER TABLE payments ADD checkout_url VARCHAR(255) NULL AFTER reference');
     app_ensure_column($pdo, 'notifications', 'provider_reference', 'ALTER TABLE notifications ADD provider_reference VARCHAR(120) NULL AFTER provider');
     app_ensure_column($pdo, 'delivery_staff', 'access_code_hash', 'ALTER TABLE delivery_staff ADD access_code_hash VARCHAR(255) NULL AFTER phone');
+<<<<<<< HEAD
     app_backfill_delivery_codes($pdo);
+=======
+    app_ensure_column($pdo, 'orders', 'subtotal', 'ALTER TABLE orders ADD subtotal INT UNSIGNED NOT NULL DEFAULT 0 AFTER status');
+    app_ensure_column($pdo, 'orders', 'delivery_fee', 'ALTER TABLE orders ADD delivery_fee INT UNSIGNED NOT NULL DEFAULT 0 AFTER subtotal');
+    app_ensure_column($pdo, 'orders', 'discount_total', 'ALTER TABLE orders ADD discount_total INT UNSIGNED NOT NULL DEFAULT 0 AFTER delivery_fee');
+    app_ensure_column($pdo, 'orders', 'promo_code', 'ALTER TABLE orders ADD promo_code VARCHAR(40) NULL AFTER discount_total');
+    app_ensure_column($pdo, 'orders', 'delivery_zone_id', 'ALTER TABLE orders ADD delivery_zone_id BIGINT UNSIGNED NULL AFTER fulfillment');
+    app_ensure_column($pdo, 'orders', 'scheduled_at', 'ALTER TABLE orders ADD scheduled_at DATETIME NULL AFTER delivery_zone_id');
+    app_ensure_column($pdo, 'order_items', 'options_text', 'ALTER TABLE order_items ADD options_text TEXT NULL AFTER name');
+    app_ensure_column($pdo, 'menu_items', 'stock_enabled', 'ALTER TABLE menu_items ADD stock_enabled BOOLEAN NOT NULL DEFAULT FALSE AFTER daily_special');
+    app_ensure_column($pdo, 'menu_items', 'stock_qty', 'ALTER TABLE menu_items ADD stock_qty INT NOT NULL DEFAULT 0 AFTER stock_enabled');
+    app_ensure_column($pdo, 'menu_items', 'low_stock_threshold', 'ALTER TABLE menu_items ADD low_stock_threshold INT NOT NULL DEFAULT 3 AFTER stock_qty');
+    app_backfill_delivery_codes($pdo);
+    app_seed_operations($pdo);
+>>>>>>> 5f92b50 (mise a jour)
 }
 
 function app_ensure_column(PDO $pdo, string $table, string $column, string $alter): void
@@ -348,8 +425,8 @@ function app_seed_database(PDO $pdo): void
     }
 
     $menuStmt = $pdo->prepare(
-        'INSERT INTO menu_items (category_id, name, description, price, max_price, emoji, available, popular, sort_order)
-         VALUES (:category_id, :name, :description, :price, :max_price, :emoji, 1, :popular, :sort_order)'
+        'INSERT INTO menu_items (category_id, name, description, price, max_price, emoji, available, popular, daily_special, sort_order)
+         VALUES (:category_id, :name, :description, :price, :max_price, :emoji, 1, :popular, 0, :sort_order)'
     );
     foreach ($seed['menu'] as $index => $item) {
         $menuStmt->execute([
@@ -415,6 +492,44 @@ function app_seed_delivery_staff(PDO $pdo): void
         ['Abdou Sarr', '+221 76 402 30 30', 'absent'],
     ] as $driver) {
         $stmt->execute([$driver[0], $driver[1], password_hash(app_env('DELIVERY_DEFAULT_CODE', '1234'), PASSWORD_DEFAULT), $driver[2]]);
+<<<<<<< HEAD
+=======
+    }
+}
+
+function app_seed_operations(PDO $pdo): void
+{
+    if ((int) $pdo->query('SELECT COUNT(*) FROM business_hours')->fetchColumn() === 0) {
+        $stmt = $pdo->prepare('INSERT INTO business_hours (weekday, open_time, close_time, active) VALUES (?, ?, ?, 1)');
+        for ($day = 1; $day <= 7; $day++) {
+            $stmt->execute([$day, '08:00:00', '23:00:00']);
+        }
+    }
+    if ((int) $pdo->query('SELECT COUNT(*) FROM delivery_zones')->fetchColumn() === 0) {
+        $stmt = $pdo->prepare('INSERT INTO delivery_zones (name, fee, minimum_order, estimated_minutes, active, sort_order) VALUES (?, ?, ?, ?, 1, ?)');
+        foreach ([['Yoff / Virage', 500, 2000, 30], ['Ngor / Almadies', 1000, 3000, 40], ['Ouakam / Mermoz', 1500, 4000, 50], ['Plateau / Medina', 2000, 5000, 60]] as $index => $zone) {
+            $stmt->execute([$zone[0], $zone[1], $zone[2], $zone[3], ($index + 1) * 10]);
+        }
+    }
+    if ((int) $pdo->query('SELECT COUNT(*) FROM promo_codes')->fetchColumn() === 0) {
+        $pdo->prepare('INSERT INTO promo_codes (code, label, type, value, minimum_order, active) VALUES (?, ?, ?, ?, ?, 1)')
+            ->execute(['KETCHUP10', 'Bienvenue Chez Ketchup', 'percent', 10, 5000]);
+    }
+    $stmt = $pdo->prepare('INSERT IGNORE INTO app_settings (setting_key, setting_value) VALUES (?, ?)');
+    foreach ([
+        'restaurant_name' => 'Chez Ketchup',
+        'restaurant_phone' => '+221 33 856 62 53',
+        'restaurant_whatsapp' => '+221 78 828 98 79',
+        'restaurant_address' => '19 Cite Alia Diene, Yoff, Dakar',
+        'social_instagram' => app_env('SOCIAL_INSTAGRAM_URL', 'https://www.instagram.com/boucher_ketchup/'),
+        'social_tiktok' => app_env('SOCIAL_TIKTOK_URL', ''),
+        'social_facebook' => app_env('SOCIAL_FACEBOOK_URL', ''),
+        'social_youtube' => app_env('SOCIAL_YOUTUBE_URL', ''),
+        'orders_paused' => '0',
+        'pickup_eta_minutes' => '25',
+    ] as $key => $value) {
+        $stmt->execute([$key, $value]);
+>>>>>>> 5f92b50 (mise a jour)
     }
 }
 
@@ -462,7 +577,94 @@ function app_save_sessions(array $sessions): void
         mkdir(dirname(SESSION_FILE), 0775, true);
     }
 
-    file_put_contents(SESSION_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    file_put_contents(SESSION_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+}
+
+function app_rate_limits(): array
+{
+    if (!file_exists(RATE_LIMIT_FILE)) {
+        return [];
+    }
+
+    $decoded = json_decode((string) file_get_contents(RATE_LIMIT_FILE), true);
+    return is_array($decoded) ? $decoded : [];
+}
+
+function app_save_rate_limits(array $limits): void
+{
+    if (!is_dir(dirname(RATE_LIMIT_FILE))) {
+        mkdir(dirname(RATE_LIMIT_FILE), 0775, true);
+    }
+
+    file_put_contents(RATE_LIMIT_FILE, json_encode($limits, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+}
+
+function app_client_ip(): string
+{
+    if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+        return trim((string) $_SERVER['HTTP_CF_CONNECTING_IP']);
+    }
+    return trim((string) ($_SERVER['REMOTE_ADDR'] ?? 'local'));
+}
+
+function app_escape_like(string $value): string
+{
+    return str_replace(['%', '_', '\\'], ['\\%', '\\_', '\\\\'], $value);
+}
+
+function app_rate_limit_key(string $scope, string $identifier): string
+{
+    return hash('sha256', $scope . '|' . strtolower(trim($identifier)) . '|' . app_client_ip());
+}
+
+function app_check_rate_limit(string $scope, string $identifier): void
+{
+    $maxAttempts = max(1, (int) app_env('AUTH_MAX_ATTEMPTS', '5'));
+    $windowSeconds = max(60, (int) app_env('AUTH_LOCK_MINUTES', '15') * 60);
+    $key = app_rate_limit_key($scope, $identifier);
+    $limits = app_rate_limits();
+    $entry = $limits[$key] ?? null;
+
+    if (!is_array($entry)) {
+        return;
+    }
+
+    $firstAt = (int) ($entry['first_at'] ?? 0);
+    $attempts = (int) ($entry['attempts'] ?? 0);
+    if ($firstAt <= 0 || time() - $firstAt > $windowSeconds) {
+        unset($limits[$key]);
+        app_save_rate_limits($limits);
+        return;
+    }
+
+    if ($attempts >= $maxAttempts) {
+        $retryAfter = max(1, $windowSeconds - (time() - $firstAt));
+        header('Retry-After: ' . $retryAfter);
+        app_json_response(['ok' => false, 'message' => 'Trop de tentatives. Reessayez plus tard.'], 429);
+    }
+}
+
+function app_record_rate_limit(string $scope, string $identifier, bool $success): void
+{
+    $windowSeconds = max(60, (int) app_env('AUTH_LOCK_MINUTES', '15') * 60);
+    $key = app_rate_limit_key($scope, $identifier);
+    $limits = app_rate_limits();
+
+    if ($success) {
+        unset($limits[$key]);
+        app_save_rate_limits($limits);
+        return;
+    }
+
+    $entry = $limits[$key] ?? ['attempts' => 0, 'first_at' => time()];
+    if (!is_array($entry) || time() - (int) ($entry['first_at'] ?? 0) > $windowSeconds) {
+        $entry = ['attempts' => 0, 'first_at' => time()];
+    }
+    $entry['attempts'] = (int) ($entry['attempts'] ?? 0) + 1;
+    $entry['last_at'] = time();
+    $limits[$key] = $entry;
+
+    app_save_rate_limits($limits);
 }
 
 function app_rate_limits(): array
@@ -623,13 +825,89 @@ function app_role_permissions(string $role): array
         'can_view_stats' => in_array($role, ['super_admin', 'manager'], true),
         'can_manage_payments' => in_array($role, ['super_admin', 'manager'], true),
         'can_manage_delivery' => in_array($role, ['super_admin', 'manager'], true),
+        'can_manage_operations' => in_array($role, ['super_admin', 'manager'], true),
         'can_export' => in_array($role, ['super_admin', 'manager'], true),
+        'can_use_pos' => in_array($role, ['super_admin', 'manager', 'cashier'], true),
     ];
 }
 
 function app_categories(): array
 {
     return app_pdo()->query('SELECT id, name, sort_order AS sort FROM categories WHERE active = 1 ORDER BY sort_order, name')->fetchAll();
+}
+
+function app_settings(): array
+{
+    $settings = [];
+    foreach (app_pdo()->query('SELECT setting_key, setting_value FROM app_settings')->fetchAll() as $row) {
+        $settings[$row['setting_key']] = (string) ($row['setting_value'] ?? '');
+    }
+    return $settings;
+}
+
+function app_delivery_zones(bool $activeOnly = true): array
+{
+    $where = $activeOnly ? 'WHERE active = 1' : '';
+    $rows = app_pdo()->query("SELECT id, name, fee, minimum_order, estimated_minutes, active, sort_order FROM delivery_zones {$where} ORDER BY sort_order, name")->fetchAll();
+    return array_map(function (array $row): array {
+        $row['id'] = (int) $row['id'];
+        $row['fee'] = (int) $row['fee'];
+        $row['minimum_order'] = (int) $row['minimum_order'];
+        $row['estimated_minutes'] = (int) $row['estimated_minutes'];
+        $row['active'] = (bool) $row['active'];
+        return $row;
+    }, $rows);
+}
+
+function app_business_hours(): array
+{
+    return array_map(function (array $row): array {
+        return [
+            'weekday' => (int) $row['weekday'],
+            'open_time' => substr((string) $row['open_time'], 0, 5),
+            'close_time' => substr((string) $row['close_time'], 0, 5),
+            'active' => (bool) $row['active'],
+        ];
+    }, app_pdo()->query('SELECT weekday, open_time, close_time, active FROM business_hours ORDER BY weekday')->fetchAll());
+}
+
+function app_is_open_now(): array
+{
+    $settings = app_settings();
+    if (($settings['orders_paused'] ?? '0') === '1') {
+        return ['open' => false, 'message' => 'Les commandes en ligne sont temporairement en pause.'];
+    }
+    $stmt = app_pdo()->prepare('SELECT open_time, close_time, active FROM business_hours WHERE weekday = ?');
+    $stmt->execute([(int) date('N')]);
+    $row = $stmt->fetch();
+    if (!$row || !(bool) $row['active']) {
+        return ['open' => false, 'message' => 'Le restaurant est ferme aujourd hui.'];
+    }
+    $now = date('H:i:s');
+    $open = (string) $row['open_time'];
+    $close = (string) $row['close_time'];
+    $isOpen = $open <= $close ? ($now >= $open && $now <= $close) : ($now >= $open || $now <= $close);
+    return ['open' => $isOpen, 'message' => $isOpen ? 'Commandes ouvertes.' : 'Le restaurant est ferme pour le moment.'];
+}
+
+function app_menu_options(array $menuIds): array
+{
+    if ($menuIds === []) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($menuIds), '?'));
+    $stmt = app_pdo()->prepare("SELECT id, menu_item_id, name, price_delta FROM menu_item_options WHERE active = 1 AND menu_item_id IN ({$placeholders}) ORDER BY sort_order, name");
+    $stmt->execute($menuIds);
+    $grouped = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $grouped[(int) $row['menu_item_id']][] = [
+            'id' => (int) $row['id'],
+            'menu_item_id' => (int) $row['menu_item_id'],
+            'name' => $row['name'],
+            'price_delta' => (int) $row['price_delta'],
+        ];
+    }
+    return $grouped;
 }
 
 function app_catalog(string $category = 'all'): array
@@ -643,7 +921,8 @@ function app_catalog(string $category = 'all'): array
 
     $stmt = app_pdo()->prepare(
         "SELECT m.id, m.name, m.description, m.price, m.max_price, m.category_id AS category,
-                m.image_url, m.emoji, m.available, m.popular, c.name AS category_name
+                m.image_url, m.emoji, m.available, m.popular, m.daily_special,
+                m.stock_enabled, m.stock_qty, m.low_stock_threshold, c.name AS category_name
          FROM menu_items m
          JOIN categories c ON c.id = m.category_id
          {$where}
@@ -658,9 +937,25 @@ function app_catalog(string $category = 'all'): array
         $item['max_price'] = $item['max_price'] === null ? null : (int) $item['max_price'];
         $item['available'] = (bool) $item['available'];
         $item['popular'] = (bool) $item['popular'];
+        $item['daily_special'] = (bool) $item['daily_special'];
+        $item['stock_enabled'] = (bool) ($item['stock_enabled'] ?? false);
+        $item['stock_qty'] = (int) ($item['stock_qty'] ?? 0);
+        $item['low_stock_threshold'] = (int) ($item['low_stock_threshold'] ?? 3);
     }
 
-    return ['categories' => app_categories(), 'items' => $items];
+    $options = app_menu_options(array_map(fn ($item) => (int) $item['id'], $items));
+    foreach ($items as &$item) {
+        $item['options'] = $options[$item['id']] ?? [];
+    }
+
+    return [
+        'categories' => app_categories(),
+        'items' => $items,
+        'zones' => app_delivery_zones(),
+        'hours' => app_business_hours(),
+        'settings' => app_settings(),
+        'open_state' => app_is_open_now(),
+    ];
 }
 
 function app_order_items(array $orderIds): array
@@ -670,7 +965,7 @@ function app_order_items(array $orderIds): array
     }
 
     $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
-    $stmt = app_pdo()->prepare("SELECT order_id, menu_item_id, name, quantity, unit_price FROM order_items WHERE order_id IN ({$placeholders}) ORDER BY id");
+    $stmt = app_pdo()->prepare("SELECT order_id, menu_item_id, name, options_text, quantity, unit_price FROM order_items WHERE order_id IN ({$placeholders}) ORDER BY id");
     $stmt->execute($orderIds);
     $grouped = [];
 
@@ -678,6 +973,7 @@ function app_order_items(array $orderIds): array
         $grouped[(int) $row['order_id']][] = [
             'menu_id' => $row['menu_item_id'] === null ? null : (int) $row['menu_item_id'],
             'name' => $row['name'],
+            'options_text' => $row['options_text'] ?? '',
             'qty' => (int) $row['quantity'],
             'unit_price' => (int) $row['unit_price'],
         ];
@@ -690,16 +986,18 @@ function app_orders(string $query = '', int $limit = 20): array
 {
     $sql = 'SELECT o.*, p.id AS payment_id, p.method AS payment_method, p.status AS payment_status,
                    p.reference AS payment_reference, p.provider AS payment_provider, p.checkout_url AS payment_checkout_url,
-                   d.name AS delivery_name, d.phone AS delivery_phone, d.status AS delivery_staff_status
+                   d.name AS delivery_name, d.phone AS delivery_phone, d.status AS delivery_staff_status,
+                   z.name AS delivery_zone_name, z.estimated_minutes AS delivery_estimated_minutes
             FROM orders o
             LEFT JOIN payments p ON p.order_id = o.id
-            LEFT JOIN delivery_staff d ON d.id = o.delivery_staff_id';
+            LEFT JOIN delivery_staff d ON d.id = o.delivery_staff_id
+            LEFT JOIN delivery_zones z ON z.id = o.delivery_zone_id';
     $params = [];
 
     if ($query !== '') {
         $sql .= ' WHERE UPPER(o.number) LIKE :query OR REPLACE(o.phone, " ", "") LIKE :phone';
-        $params['query'] = '%' . strtoupper($query) . '%';
-        $params['phone'] = '%' . str_replace(' ', '', $query) . '%';
+        $params['query'] = '%' . app_escape_like(strtoupper($query)) . '%';
+        $params['phone'] = '%' . app_escape_like(str_replace(' ', '', $query)) . '%';
     }
 
     $sql .= ' ORDER BY o.created_at DESC, o.id DESC LIMIT ' . max(1, $limit);
@@ -710,9 +1008,14 @@ function app_orders(string $query = '', int $limit = 20): array
 
     foreach ($orders as &$order) {
         $order['id'] = (int) $order['id'];
+        $order['subtotal'] = (int) ($order['subtotal'] ?? 0);
+        $order['delivery_fee'] = (int) ($order['delivery_fee'] ?? 0);
+        $order['discount_total'] = (int) ($order['discount_total'] ?? 0);
         $order['total'] = (int) $order['total'];
         $order['payment_id'] = $order['payment_id'] === null ? null : (int) $order['payment_id'];
         $order['delivery_staff_id'] = $order['delivery_staff_id'] === null ? null : (int) $order['delivery_staff_id'];
+        $order['delivery_zone_id'] = $order['delivery_zone_id'] === null ? null : (int) $order['delivery_zone_id'];
+        $order['delivery_estimated_minutes'] = $order['delivery_estimated_minutes'] === null ? null : (int) $order['delivery_estimated_minutes'];
         $order['items'] = $items[$order['id']] ?? [];
     }
 
@@ -837,21 +1140,94 @@ function app_update_delivery_order_status(array $body): array
 function app_new_order_number(): string
 {
     $prefix = 'CK-' . date('Y') . '-';
-    $stmt = app_pdo()->prepare('SELECT number FROM orders WHERE number LIKE ? ORDER BY number DESC LIMIT 1');
+    $stmt = app_pdo()->prepare('SELECT COALESCE(MAX(CAST(SUBSTRING(number, 9) AS UNSIGNED)), 0) FROM orders WHERE number LIKE ?');
     $stmt->execute([$prefix . '%']);
-    $last = (string) ($stmt->fetchColumn() ?: '');
-    $next = preg_match('/(\d{4})$/', $last, $matches) ? ((int) $matches[1]) + 1 : 1;
+    $next = (int) $stmt->fetchColumn() + 1;
 
     return $prefix . str_pad((string) $next, 4, '0', STR_PAD_LEFT);
 }
 
-function app_create_order(array $body): array
+function app_order_option_summary(int $menuItemId, array $optionIds): array
+{
+    $optionIds = array_values(array_unique(array_filter(array_map('intval', $optionIds))));
+    if ($optionIds === []) {
+        return ['names' => [], 'price_delta' => 0];
+    }
+    $placeholders = implode(',', array_fill(0, count($optionIds), '?'));
+    $stmt = app_pdo()->prepare("SELECT id, name, price_delta FROM menu_item_options WHERE active = 1 AND menu_item_id = ? AND id IN ({$placeholders})");
+    $stmt->execute([$menuItemId, ...$optionIds]);
+    $rows = $stmt->fetchAll();
+    if (count($rows) !== count($optionIds)) {
+        app_json_response(['ok' => false, 'message' => 'Une option du panier est indisponible.'], 422);
+    }
+    return [
+        'names' => array_map(fn ($row) => (string) $row['name'], $rows),
+        'price_delta' => array_sum(array_map(fn ($row) => (int) $row['price_delta'], $rows)),
+    ];
+}
+
+function app_active_promo(string $code, int $subtotal): ?array
+{
+    $code = strtoupper(trim($code));
+    if ($code === '') {
+        return null;
+    }
+    $stmt = app_pdo()->prepare('SELECT code, type, value, minimum_order FROM promo_codes WHERE UPPER(code) = ? AND active = 1 LIMIT 1');
+    $stmt->execute([$code]);
+    $promo = $stmt->fetch();
+    if (!$promo) {
+        app_json_response(['ok' => false, 'message' => 'Code promo invalide.'], 422);
+    }
+    if ($subtotal < (int) $promo['minimum_order']) {
+        app_json_response(['ok' => false, 'message' => 'Minimum de commande non atteint pour ce code promo.'], 422);
+    }
+    $discount = $promo['type'] === 'percent'
+        ? (int) floor($subtotal * min(100, (int) $promo['value']) / 100)
+        : min($subtotal, (int) $promo['value']);
+    return ['code' => $promo['code'], 'discount' => max(0, $discount)];
+}
+
+function app_validate_scheduled_at(?string $raw): ?string
+{
+    $raw = trim((string) $raw);
+    if ($raw === '') {
+        return null;
+    }
+
+    $timestamp = strtotime($raw);
+    if ($timestamp === false || $timestamp < time() + 30 * 60 || $timestamp > time() + 7 * 24 * 3600) {
+        app_json_response(['ok' => false, 'message' => 'Choisissez un créneau entre 30 minutes et 7 jours.'], 422);
+    }
+
+    $weekday = (int) date('N', $timestamp);
+    $stmt = app_pdo()->prepare('SELECT open_time, close_time, active FROM business_hours WHERE weekday = ?');
+    $stmt->execute([$weekday]);
+    $hours = $stmt->fetch();
+    if (!$hours || !(bool) $hours['active']) {
+        app_json_response(['ok' => false, 'message' => 'Le restaurant est fermé sur ce créneau.'], 422);
+    }
+
+    $time = date('H:i:s', $timestamp);
+    $open = (string) $hours['open_time'];
+    $close = (string) $hours['close_time'];
+    $inside = $open <= $close ? ($time >= $open && $time <= $close) : ($time >= $open || $time <= $close);
+    if (!$inside) {
+        app_json_response(['ok' => false, 'message' => 'Le créneau choisi est hors horaires.'], 422);
+    }
+
+    return date('Y-m-d H:i:s', $timestamp);
+}
+
+function app_create_order(array $body, ?array $user = null): array
 {
     $items = $body['items'] ?? [];
     $customer = $body['customer'] ?? [];
 
     if (!is_array($items) || count($items) === 0) {
         app_json_response(['ok' => false, 'message' => 'Le panier est vide.'], 422);
+    }
+    if (count($items) > 50) {
+        app_json_response(['ok' => false, 'message' => 'Maximum 50 articles par commande.'], 422);
     }
 
     foreach (['name', 'phone'] as $field) {
@@ -864,6 +1240,14 @@ function app_create_order(array $body): array
     if (!in_array($fulfillment, ['delivery', 'pickup'], true)) {
         app_json_response(['ok' => false, 'message' => 'Mode de retrait invalide.'], 422);
     }
+<<<<<<< HEAD
+=======
+    $scheduledAt = app_validate_scheduled_at(isset($body['scheduled_at']) ? (string) $body['scheduled_at'] : null);
+    $openState = app_is_open_now();
+    if ($scheduledAt === null && !$openState['open']) {
+        app_json_response(['ok' => false, 'message' => $openState['message']], 422);
+    }
+>>>>>>> 5f92b50 (mise a jour)
     if ($fulfillment === 'delivery' && trim((string) ($customer['address'] ?? '')) === '') {
         app_json_response(['ok' => false, 'message' => 'Adresse obligatoire pour une livraison.'], 422);
     }
@@ -871,7 +1255,7 @@ function app_create_order(array $body): array
     $pdo = app_pdo();
     $ids = array_map(fn ($item) => (int) ($item['id'] ?? 0), $items);
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $stmt = $pdo->prepare("SELECT id, name, price, available FROM menu_items WHERE id IN ({$placeholders})");
+    $stmt = $pdo->prepare("SELECT id, name, price, available, stock_enabled, stock_qty FROM menu_items WHERE id IN ({$placeholders})");
     $stmt->execute($ids);
     $menu = [];
     foreach ($stmt->fetchAll() as $row) {
@@ -879,17 +1263,47 @@ function app_create_order(array $body): array
     }
 
     $orderItems = [];
-    $total = 0;
+    $requestedStock = [];
+    $subtotal = 0;
     foreach ($items as $item) {
         $id = (int) ($item['id'] ?? 0);
         $qty = max(1, (int) ($item['qty'] ?? 1));
+        $qty = min($qty, 99);
         if (!isset($menu[$id]) || !(bool) $menu[$id]['available']) {
             app_json_response(['ok' => false, 'message' => 'Un plat du panier est indisponible.'], 422);
         }
-        $unit = (int) $menu[$id]['price'];
-        $orderItems[] = ['menu_id' => $id, 'name' => $menu[$id]['name'], 'qty' => $qty, 'unit_price' => $unit];
-        $total += $unit * $qty;
+        if ((bool) ($menu[$id]['stock_enabled'] ?? false)) {
+            $requestedStock[$id] = ($requestedStock[$id] ?? 0) + $qty;
+        }
+        $optionSummary = app_order_option_summary($id, is_array($item['options'] ?? null) ? $item['options'] : []);
+        $unit = max(0, (int) $menu[$id]['price'] + (int) $optionSummary['price_delta']);
+        $orderItems[] = ['menu_id' => $id, 'name' => $menu[$id]['name'], 'options_text' => implode(', ', $optionSummary['names']), 'qty' => $qty, 'unit_price' => $unit];
+        $subtotal += $unit * $qty;
     }
+    foreach ($requestedStock as $id => $qty) {
+        if ((int) $menu[$id]['stock_qty'] < $qty) {
+            app_json_response(['ok' => false, 'message' => $menu[$id]['name'] . ' est en stock insuffisant.'], 422);
+        }
+    }
+
+    $deliveryZoneId = null;
+    $deliveryFee = 0;
+    if ($fulfillment === 'delivery') {
+        $deliveryZoneId = (int) ($body['delivery_zone_id'] ?? 0);
+        $zoneStmt = $pdo->prepare('SELECT id, fee, minimum_order FROM delivery_zones WHERE id = ? AND active = 1');
+        $zoneStmt->execute([$deliveryZoneId]);
+        $zone = $zoneStmt->fetch();
+        if (!$zone) {
+            app_json_response(['ok' => false, 'message' => 'Zone de livraison obligatoire.'], 422);
+        }
+        if ($subtotal < (int) $zone['minimum_order']) {
+            app_json_response(['ok' => false, 'message' => 'Minimum de commande non atteint pour cette zone.'], 422);
+        }
+        $deliveryFee = (int) $zone['fee'];
+    }
+    $promo = app_active_promo((string) ($body['promo_code'] ?? ''), $subtotal);
+    $discountTotal = (int) ($promo['discount'] ?? 0);
+    $total = max(0, $subtotal + $deliveryFee - $discountTotal);
 
     $name = trim((string) $customer['name']);
     $phone = trim((string) $customer['phone']);
@@ -906,9 +1320,17 @@ function app_create_order(array $body): array
     $customerId = (int) $pdo->query('SELECT id FROM customers WHERE phone = ' . $pdo->quote($phone))->fetchColumn();
 
     $number = app_new_order_number();
+    $isPosOrder = $user !== null && (string) ($body['source'] ?? '') === 'pos';
+    $status = 'pending';
+    if ($isPosOrder) {
+        $requestedStatus = (string) ($body['status'] ?? 'prep');
+        $status = in_array($requestedStatus, ['pending', 'prep', 'done'], true) ? $requestedStatus : 'prep';
+    }
+    $createdBy = $user !== null && isset($user['user_id']) ? (int) $user['user_id'] : null;
+
     $pdo->prepare(
-        'INSERT INTO orders (number, customer_id, customer_name, phone, address, note, fulfillment, status, total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO orders (number, customer_id, customer_name, phone, address, note, fulfillment, delivery_zone_id, scheduled_at, status, subtotal, delivery_fee, discount_total, promo_code, total, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )->execute([
         $number,
         $customerId,
@@ -917,14 +1339,29 @@ function app_create_order(array $body): array
         $address,
         trim((string) ($customer['note'] ?? '')),
         $fulfillment,
+<<<<<<< HEAD
         'pending',
+=======
+        $deliveryZoneId,
+        $scheduledAt,
+        $status,
+        $subtotal,
+        $deliveryFee,
+        $discountTotal,
+        $promo['code'] ?? null,
+>>>>>>> 5f92b50 (mise a jour)
         $total,
+        $createdBy,
     ]);
     $orderId = (int) $pdo->lastInsertId();
 
-    $itemStmt = $pdo->prepare('INSERT INTO order_items (order_id, menu_item_id, name, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?)');
+    $itemStmt = $pdo->prepare('INSERT INTO order_items (order_id, menu_item_id, name, options_text, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)');
     foreach ($orderItems as $item) {
-        $itemStmt->execute([$orderId, $item['menu_id'], $item['name'], $item['qty'], $item['unit_price'], $item['unit_price'] * $item['qty']]);
+        $itemStmt->execute([$orderId, $item['menu_id'], $item['name'], $item['options_text'], $item['qty'], $item['unit_price'], $item['unit_price'] * $item['qty']]);
+        if ((bool) ($menu[$item['menu_id']]['stock_enabled'] ?? false)) {
+            $pdo->prepare('UPDATE menu_items SET available = IF(stock_qty <= ?, 0, available), stock_qty = GREATEST(stock_qty - ?, 0) WHERE id = ?')
+                ->execute([$item['qty'], $item['qty'], $item['menu_id']]);
+        }
     }
 
     $paymentMethod = (string) ($body['payment_method'] ?? 'cash');
@@ -932,8 +1369,10 @@ function app_create_order(array $body): array
         'name' => $name,
         'phone' => $phone,
     ]);
+    $paymentStatus = !empty($body['paid']) ? 'paid' : $payment['status'];
+    $paidAt = $paymentStatus === 'paid' ? date('Y-m-d H:i:s') : null;
 
-    $pdo->prepare('INSERT INTO payments (order_id, method, provider, reference, checkout_url, amount, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    $pdo->prepare('INSERT INTO payments (order_id, method, provider, reference, checkout_url, amount, status, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         ->execute([
             $orderId,
             $paymentMethod,
@@ -941,14 +1380,17 @@ function app_create_order(array $body): array
             $payment['reference'],
             $payment['checkout_url'],
             $total,
-            $payment['status'],
+            $paymentStatus,
+            $paidAt,
         ]);
     $pdo->prepare('INSERT INTO order_status_history (order_id, status, note) VALUES (?, ?, ?)')
-        ->execute([$orderId, 'pending', 'Commande reçue']);
+        ->execute([$orderId, $status, $isPosOrder ? 'Commande saisie en caisse' : 'Commande reçue']);
     $pdo->commit();
 
     $order = app_orders($number, 1)[0];
-    app_queue_notification($orderId, 'confirmation', 'whatsapp');
+    if (!$isPosOrder) {
+        app_queue_notification($orderId, 'confirmation', 'whatsapp');
+    }
 
     return $order;
 }
@@ -982,8 +1424,17 @@ function app_base_url(): string
 
 function app_prepare_payment(string $method, int $orderId, string $number, int $amount, array $customer): array
 {
+    if ($method === 'cash') {
+        return [
+            'reference' => 'CASH-' . date('Ymd') . '-' . str_pad((string) $orderId, 5, '0', STR_PAD_LEFT),
+            'provider' => 'cash',
+            'checkout_url' => null,
+            'status' => 'pending',
+        ];
+    }
+
     if (!in_array($method, ['orange_money', 'wave'], true)) {
-        app_json_response(['ok' => false, 'message' => 'Choisissez Orange Money ou Wave pour le paiement.'], 422);
+        app_json_response(['ok' => false, 'message' => 'Choisissez Cash, Orange Money ou Wave pour le paiement.'], 422);
     }
 
     $reference = strtoupper($method) . '-' . date('Ymd') . '-' . str_pad((string) $orderId, 5, '0', STR_PAD_LEFT);
@@ -1047,7 +1498,17 @@ function app_admin_summary(?array $user = null): array
         'payments_paid_today' => (int) $pdo->query("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'paid' AND DATE(paid_at) = '{$today}'")->fetchColumn(),
     ];
 
+<<<<<<< HEAD
     $response = ['summary' => $summary, 'orders' => app_orders('', 25), 'delivery_staff' => app_delivery_staff()];
+=======
+    $response = [
+        'summary' => $summary,
+        'orders' => app_orders('', 25),
+        'delivery_staff' => app_delivery_staff(),
+        'operations' => app_operations_config(),
+        'kitchen_orders' => app_kitchen_orders(),
+    ];
+>>>>>>> 5f92b50 (mise a jour)
     if ($user !== null && !empty(app_role_permissions((string) ($user['role'] ?? ''))['can_view_stats'])) {
         $response['checks'] = app_system_checks();
     }
@@ -1055,6 +1516,144 @@ function app_admin_summary(?array $user = null): array
     return $response;
 }
 
+<<<<<<< HEAD
+=======
+function app_operations_config(): array
+{
+    return [
+        'settings' => app_settings(),
+        'hours' => app_business_hours(),
+        'zones' => app_delivery_zones(false),
+        'promos' => app_promo_codes(),
+    ];
+}
+
+function app_save_settings(array $body): array
+{
+    $stmt = app_pdo()->prepare('INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)');
+    foreach (['restaurant_name', 'restaurant_phone', 'restaurant_whatsapp', 'restaurant_address', 'pickup_eta_minutes', 'social_instagram', 'social_tiktok', 'social_facebook', 'social_youtube'] as $key) {
+        if (array_key_exists($key, $body)) {
+            $stmt->execute([$key, trim((string) $body[$key])]);
+        }
+    }
+    if (array_key_exists('orders_paused', $body)) {
+        $stmt->execute(['orders_paused', !empty($body['orders_paused']) ? '1' : '0']);
+    }
+    return app_operations_config();
+}
+
+function app_save_business_hours(array $hours): array
+{
+    $stmt = app_pdo()->prepare('INSERT INTO business_hours (weekday, open_time, close_time, active) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE open_time = VALUES(open_time), close_time = VALUES(close_time), active = VALUES(active)');
+    foreach ($hours as $row) {
+        $weekday = (int) ($row['weekday'] ?? 0);
+        $open = trim((string) ($row['open_time'] ?? '08:00'));
+        $close = trim((string) ($row['close_time'] ?? '23:00'));
+        if ($weekday < 1 || $weekday > 7 || !preg_match('/^\d{2}:\d{2}$/', $open) || !preg_match('/^\d{2}:\d{2}$/', $close)) {
+            app_json_response(['ok' => false, 'message' => 'Horaire invalide.'], 422);
+        }
+        $stmt->execute([$weekday, $open . ':00', $close . ':00', !empty($row['active']) ? 1 : 0]);
+    }
+    return app_operations_config();
+}
+
+function app_save_delivery_zone(array $body): array
+{
+    $id = (int) ($body['id'] ?? 0);
+    $name = trim((string) ($body['name'] ?? ''));
+    if ($name === '') {
+        app_json_response(['ok' => false, 'message' => 'Nom de zone obligatoire.'], 422);
+    }
+    $data = [$name, max(0, (int) ($body['fee'] ?? 0)), max(0, (int) ($body['minimum_order'] ?? 0)), max(5, (int) ($body['estimated_minutes'] ?? 45)), !empty($body['active']) ? 1 : 0];
+    if ($id > 0) {
+        app_pdo()->prepare('UPDATE delivery_zones SET name = ?, fee = ?, minimum_order = ?, estimated_minutes = ?, active = ? WHERE id = ?')->execute([...$data, $id]);
+    } else {
+        $sort = (int) app_pdo()->query('SELECT COALESCE(MAX(sort_order), 0) + 10 FROM delivery_zones')->fetchColumn();
+        app_pdo()->prepare('INSERT INTO delivery_zones (name, fee, minimum_order, estimated_minutes, active, sort_order) VALUES (?, ?, ?, ?, ?, ?)')->execute([...$data, $sort]);
+    }
+    return app_operations_config();
+}
+
+function app_promo_codes(): array
+{
+    return array_map(function (array $row): array {
+        $row['id'] = (int) $row['id'];
+        $row['value'] = (int) $row['value'];
+        $row['minimum_order'] = (int) $row['minimum_order'];
+        $row['active'] = (bool) $row['active'];
+        return $row;
+    }, app_pdo()->query('SELECT id, code, label, type, value, minimum_order, active FROM promo_codes ORDER BY active DESC, code')->fetchAll());
+}
+
+function app_save_promo_code(array $body): array
+{
+    $id = (int) ($body['id'] ?? 0);
+    $code = strtoupper(preg_replace('/\s+/', '', trim((string) ($body['code'] ?? ''))));
+    $label = trim((string) ($body['label'] ?? ''));
+    $type = (string) ($body['type'] ?? 'fixed');
+    $value = max(1, (int) ($body['value'] ?? 0));
+    if ($code === '' || $label === '' || !in_array($type, ['fixed', 'percent'], true)) {
+        app_json_response(['ok' => false, 'message' => 'Code promo invalide.'], 422);
+    }
+    $data = [$code, $label, $type, $value, max(0, (int) ($body['minimum_order'] ?? 0)), !empty($body['active']) ? 1 : 0];
+    try {
+        if ($id > 0) {
+            app_pdo()->prepare('UPDATE promo_codes SET code = ?, label = ?, type = ?, value = ?, minimum_order = ?, active = ? WHERE id = ?')->execute([...$data, $id]);
+        } else {
+            app_pdo()->prepare('INSERT INTO promo_codes (code, label, type, value, minimum_order, active) VALUES (?, ?, ?, ?, ?, ?)')->execute($data);
+        }
+    } catch (PDOException $error) {
+        app_json_response(['ok' => false, 'message' => 'Ce code promo existe deja.'], 422);
+    }
+    return app_operations_config();
+}
+
+function app_save_menu_options(int $menuItemId, array $options): array
+{
+    if ($menuItemId <= 0) {
+        app_json_response(['ok' => false, 'message' => 'Plat invalide.'], 422);
+    }
+    $pdo = app_pdo();
+    $pdo->prepare('DELETE FROM menu_item_options WHERE menu_item_id = ?')->execute([$menuItemId]);
+    $stmt = $pdo->prepare('INSERT INTO menu_item_options (menu_item_id, name, price_delta, active, sort_order) VALUES (?, ?, ?, 1, ?)');
+    foreach ($options as $index => $option) {
+        $name = trim((string) ($option['name'] ?? ''));
+        if ($name !== '') {
+            $stmt->execute([$menuItemId, $name, (int) ($option['price_delta'] ?? 0), ($index + 1) * 10]);
+        }
+    }
+    return app_menu_item($menuItemId);
+}
+
+function app_kitchen_orders(): array
+{
+    return array_values(array_filter(app_orders('', 50), fn ($order) => in_array($order['status'], ['pending', 'prep'], true)));
+}
+
+function app_create_review(array $body): array
+{
+    $stmt = app_pdo()->prepare('SELECT id FROM orders WHERE number = ? AND REPLACE(phone, " ", "") LIKE ? LIMIT 1');
+    $stmt->execute([trim((string) ($body['order_number'] ?? '')), '%' . app_escape_like(str_replace(' ', '', (string) ($body['phone'] ?? ''))) . '%']);
+    $orderId = (int) ($stmt->fetchColumn() ?: 0);
+    $rating = (int) ($body['rating'] ?? 0);
+    if ($orderId <= 0 || $rating < 1 || $rating > 5) {
+        app_json_response(['ok' => false, 'message' => 'Avis invalide ou commande introuvable.'], 422);
+    }
+    app_pdo()->prepare('INSERT INTO customer_reviews (order_id, rating, comment) VALUES (?, ?, ?)')->execute([$orderId, $rating, trim((string) ($body['comment'] ?? ''))]);
+    return ['rating' => $rating];
+}
+
+function app_reviews(): array
+{
+    $rows = app_pdo()->query('SELECT r.id, r.rating, r.comment, r.created_at, o.number, o.customer_name FROM customer_reviews r JOIN orders o ON o.id = r.order_id ORDER BY r.created_at DESC LIMIT 50')->fetchAll();
+    return array_map(function (array $row): array {
+        $row['id'] = (int) $row['id'];
+        $row['rating'] = (int) $row['rating'];
+        return $row;
+    }, $rows);
+}
+
+>>>>>>> 5f92b50 (mise a jour)
 function app_system_checks(): array
 {
     $checks = [];
@@ -1080,6 +1679,17 @@ function app_system_checks(): array
         'message' => $providerReady ? "Fournisseur {$provider} configure." : 'Notifications automatiques non configurees ou incompletes.',
     ];
     $checks[] = [
+<<<<<<< HEAD
+=======
+        'key' => 'payment_callback_secret',
+        'label' => 'Secret callback paiement',
+        'status' => app_env('PAYMENT_CALLBACK_SECRET', '') !== '' ? 'ok' : 'warning',
+        'message' => app_env('PAYMENT_CALLBACK_SECRET', '') !== ''
+            ? 'Callback paiement protege par secret.'
+            : 'PAYMENT_CALLBACK_SECRET est vide: a renseigner avant production.',
+    ];
+    $checks[] = [
+>>>>>>> 5f92b50 (mise a jour)
         'key' => 'delivery_code',
         'label' => 'Code livreur par defaut',
         'status' => app_env('DELIVERY_DEFAULT_CODE', '1234') !== '1234' ? 'ok' : 'warning',
@@ -1321,6 +1931,7 @@ function app_delivery_staff(): array
 
 function app_delivery_staff_one(int $id): array
 {
+<<<<<<< HEAD
     foreach (app_delivery_staff() as $driver) {
         if ((int) $driver['id'] === $id) {
             return $driver;
@@ -1328,6 +1939,17 @@ function app_delivery_staff_one(int $id): array
     }
 
     app_json_response(['ok' => false, 'message' => 'Livreur introuvable.'], 404);
+=======
+    $stmt = app_pdo()->prepare('SELECT id, name, phone, status, active FROM delivery_staff WHERE id = ?');
+    $stmt->execute([$id]);
+    $driver = $stmt->fetch();
+    if (!$driver) {
+        app_json_response(['ok' => false, 'message' => 'Livreur introuvable.'], 404);
+    }
+    $driver['id'] = (int) $driver['id'];
+    $driver['active'] = (bool) $driver['active'];
+    return $driver;
+>>>>>>> 5f92b50 (mise a jour)
 }
 
 function app_save_delivery_staff(array $body): array
@@ -1457,6 +2079,39 @@ function app_update_payment_status(int $orderId, string $status): array
     return app_orders('', 25);
 }
 
+function app_apply_payment_callback(array $body): array
+{
+    $secret = app_env('PAYMENT_CALLBACK_SECRET', '');
+    if ($secret === '' && app_is_production()) {
+        app_json_response(['ok' => false, 'message' => 'PAYMENT_CALLBACK_SECRET requis en production.'], 500);
+    }
+    if ($secret !== '' && !hash_equals($secret, (string) ($body['secret'] ?? ''))) {
+        app_json_response(['ok' => false, 'message' => 'Signature paiement invalide.'], 403);
+    }
+
+    $reference = trim((string) ($body['reference'] ?? ''));
+    $status = (string) ($body['status'] ?? 'paid');
+    if ($reference === '' || !in_array($status, ['paid', 'failed', 'refunded'], true)) {
+        app_json_response(['ok' => false, 'message' => 'Callback paiement invalide.'], 422);
+    }
+
+    $paidAtSql = $status === 'paid' ? ', paid_at = NOW()' : ', paid_at = NULL';
+    $stmt = app_pdo()->prepare("UPDATE payments SET status = ? {$paidAtSql} WHERE reference = ?");
+    $stmt->execute([$status, $reference]);
+    if ($stmt->rowCount() === 0) {
+        app_json_response(['ok' => false, 'message' => 'Reference paiement introuvable.'], 404);
+    }
+
+    $lookup = app_pdo()->prepare('SELECT order_id FROM payments WHERE reference = ?');
+    $lookup->execute([$reference]);
+    $orderId = (int) $lookup->fetchColumn();
+    if ($status === 'paid' && $orderId > 0) {
+        app_queue_notification($orderId, 'payment', 'whatsapp');
+    }
+
+    return $orderId > 0 ? app_order_by_id($orderId) : [];
+}
+
 function app_admin_stats(): array
 {
     $pdo = app_pdo();
@@ -1552,13 +2207,13 @@ function app_export_csv(string $type): void
 
     if ($type === 'menu') {
         $rows = $pdo->query(
-            "SELECT m.name, c.name AS category, m.price, m.max_price, m.available, m.popular, m.image_url
+            "SELECT m.name, c.name AS category, m.price, m.max_price, m.available, m.popular, m.daily_special, m.image_url
              FROM menu_items m
              JOIN categories c ON c.id = m.category_id
              WHERE m.active = 1
              ORDER BY c.sort_order, m.sort_order"
         )->fetchAll(PDO::FETCH_NUM);
-        app_csv_response("chez-ketchup-menu-{$date}.csv", ['plat', 'categorie', 'prix', 'prix_max', 'disponible', 'incontournable', 'image'], $rows);
+        app_csv_response("chez-ketchup-menu-{$date}.csv", ['plat', 'categorie', 'prix', 'prix_max', 'disponible', 'incontournable', 'plat_du_jour', 'image'], $rows);
     }
 
     if ($type === 'notifications') {
@@ -1753,13 +2408,33 @@ function app_notification_templates(array $order): array
 
 function app_order_by_id(int $id): array
 {
-    foreach (app_orders('', 200) as $order) {
-        if ((int) $order['id'] === $id) {
-            return $order;
-        }
+    $pdo = app_pdo();
+    $sql = 'SELECT o.*, p.id AS payment_id, p.method AS payment_method, p.status AS payment_status,
+                   p.reference AS payment_reference, p.provider AS payment_provider, p.checkout_url AS payment_checkout_url,
+                   d.name AS delivery_name, d.phone AS delivery_phone, d.status AS delivery_staff_status,
+                   z.name AS delivery_zone_name, z.estimated_minutes AS delivery_estimated_minutes
+            FROM orders o
+            LEFT JOIN payments p ON p.order_id = o.id
+            LEFT JOIN delivery_staff d ON d.id = o.delivery_staff_id
+            LEFT JOIN delivery_zones z ON z.id = o.delivery_zone_id
+            WHERE o.id = ?';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$id]);
+    $order = $stmt->fetch();
+    if (!$order) {
+        app_json_response(['ok' => false, 'message' => 'Commande introuvable.'], 404);
     }
-
-    app_json_response(['ok' => false, 'message' => 'Commande introuvable.'], 404);
+    $order['id'] = (int) $order['id'];
+    $order['subtotal'] = (int) ($order['subtotal'] ?? 0);
+    $order['delivery_fee'] = (int) ($order['delivery_fee'] ?? 0);
+    $order['discount_total'] = (int) ($order['discount_total'] ?? 0);
+    $order['total'] = (int) $order['total'];
+    $order['payment_id'] = $order['payment_id'] === null ? null : (int) $order['payment_id'];
+    $order['delivery_staff_id'] = $order['delivery_staff_id'] === null ? null : (int) $order['delivery_staff_id'];
+    $order['delivery_zone_id'] = $order['delivery_zone_id'] === null ? null : (int) $order['delivery_zone_id'];
+    $order['delivery_estimated_minutes'] = $order['delivery_estimated_minutes'] === null ? null : (int) $order['delivery_estimated_minutes'];
+    $order['items'] = app_order_items([$id])[$id] ?? [];
+    return $order;
 }
 
 function app_queue_notification(int $orderId, string $template, string $channel = 'whatsapp'): array
@@ -2128,6 +2803,9 @@ function app_validate_menu_payload(array $body, bool $partial = false): array
     $category = trim((string) ($body['category'] ?? ''));
     $price = (int) ($body['price'] ?? 0);
     $maxPrice = isset($body['max_price']) && (int) $body['max_price'] > 0 ? (int) $body['max_price'] : null;
+    $stockEnabled = !empty($body['stock_enabled']);
+    $stockQty = max(0, (int) ($body['stock_qty'] ?? 0));
+    $lowStockThreshold = max(0, (int) ($body['low_stock_threshold'] ?? 3));
 
     if ($name === '' || $category === '' || $price <= 0) {
         app_json_response(['ok' => false, 'message' => 'Nom, catégorie et prix sont obligatoires.'], 422);
@@ -2153,7 +2831,24 @@ function app_validate_menu_payload(array $body, bool $partial = false): array
         'image_url' => trim((string) ($body['image_url'] ?? '')),
         'available' => (bool) ($body['available'] ?? true),
         'popular' => (bool) ($body['popular'] ?? false),
+        'daily_special' => (bool) ($body['daily_special'] ?? false),
+        'stock_enabled' => $stockEnabled,
+        'stock_qty' => $stockQty,
+        'low_stock_threshold' => $lowStockThreshold,
     ];
+}
+
+function app_validate_daily_special_limit(PDO $pdo, bool $dailySpecial, int $currentId = 0): void
+{
+    if (!$dailySpecial) {
+        return;
+    }
+
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM menu_items WHERE active = 1 AND daily_special = 1 AND id <> ?');
+    $stmt->execute([$currentId]);
+    if ((int) $stmt->fetchColumn() >= 3) {
+        app_json_response(['ok' => false, 'message' => 'Vous pouvez afficher au maximum 3 plats du jour. Retirez-en un avant d’en ajouter un autre.'], 422);
+    }
 }
 
 function app_create_menu_item(array $body): array
@@ -2161,24 +2856,38 @@ function app_create_menu_item(array $body): array
     $item = app_validate_menu_payload($body);
     $pdo = app_pdo();
     $sort = (int) $pdo->query('SELECT COALESCE(MAX(sort_order), 0) + 10 FROM menu_items')->fetchColumn();
-    $stmt = $pdo->prepare(
-        'INSERT INTO menu_items (category_id, name, description, price, max_price, image_url, emoji, available, active, popular, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
-    );
-    $stmt->execute([
-        $item['category'],
-        $item['name'],
-        $item['description'],
-        $item['price'],
-        $item['max_price'],
-        $item['image_url'],
-        $item['emoji'],
-        $item['available'] ? 1 : 0,
-        $item['popular'] ? 1 : 0,
-        $sort,
-    ]);
+    $pdo->beginTransaction();
+    try {
+        app_validate_daily_special_limit($pdo, $item['daily_special']);
 
-    return app_menu_item((int) $pdo->lastInsertId());
+        $stmt = $pdo->prepare(
+            'INSERT INTO menu_items (category_id, name, description, price, max_price, image_url, emoji, available, active, popular, daily_special, stock_enabled, stock_qty, low_stock_threshold, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([
+            $item['category'],
+            $item['name'],
+            $item['description'],
+            $item['price'],
+            $item['max_price'],
+            $item['image_url'],
+            $item['emoji'],
+            $item['available'] ? 1 : 0,
+            $item['popular'] ? 1 : 0,
+            $item['daily_special'] ? 1 : 0,
+            $item['stock_enabled'] ? 1 : 0,
+            $item['stock_qty'],
+            $item['low_stock_threshold'],
+            $sort,
+        ]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->commit();
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
+
+    return app_menu_item($id);
 }
 
 function app_update_menu_item(int $id, array $body): array
@@ -2188,23 +2897,37 @@ function app_update_menu_item(int $id, array $body): array
     }
 
     $item = app_validate_menu_payload($body);
-    $stmt = app_pdo()->prepare(
-        'UPDATE menu_items
-         SET category_id = ?, name = ?, description = ?, price = ?, max_price = ?, image_url = ?, emoji = ?, available = ?, popular = ?
-         WHERE id = ? AND active = 1'
-    );
-    $stmt->execute([
-        $item['category'],
-        $item['name'],
-        $item['description'],
-        $item['price'],
-        $item['max_price'],
-        $item['image_url'],
-        $item['emoji'],
-        $item['available'] ? 1 : 0,
-        $item['popular'] ? 1 : 0,
-        $id,
-    ]);
+    $pdo = app_pdo();
+    $pdo->beginTransaction();
+    try {
+        app_validate_daily_special_limit($pdo, $item['daily_special'], $id);
+
+        $stmt = $pdo->prepare(
+            'UPDATE menu_items
+             SET category_id = ?, name = ?, description = ?, price = ?, max_price = ?, image_url = ?, emoji = ?, available = ?, popular = ?, daily_special = ?, stock_enabled = ?, stock_qty = ?, low_stock_threshold = ?
+             WHERE id = ? AND active = 1'
+        );
+        $stmt->execute([
+            $item['category'],
+            $item['name'],
+            $item['description'],
+            $item['price'],
+            $item['max_price'],
+            $item['image_url'],
+            $item['emoji'],
+            $item['available'] ? 1 : 0,
+            $item['popular'] ? 1 : 0,
+            $item['daily_special'] ? 1 : 0,
+            $item['stock_enabled'] ? 1 : 0,
+            $item['stock_qty'],
+            $item['low_stock_threshold'],
+            $id,
+        ]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
 
     return app_menu_item($id);
 }
@@ -2233,7 +2956,8 @@ function app_menu_item(int $id): array
 {
     $stmt = app_pdo()->prepare(
         'SELECT m.id, m.name, m.description, m.price, m.max_price, m.category_id AS category,
-                m.image_url, m.emoji, m.available, m.popular, c.name AS category_name
+                m.image_url, m.emoji, m.available, m.popular, m.daily_special,
+                m.stock_enabled, m.stock_qty, m.low_stock_threshold, c.name AS category_name
          FROM menu_items m
          JOIN categories c ON c.id = m.category_id
          WHERE m.id = ? AND m.active = 1'
@@ -2250,5 +2974,11 @@ function app_menu_item(int $id): array
     $item['max_price'] = $item['max_price'] === null ? null : (int) $item['max_price'];
     $item['available'] = (bool) $item['available'];
     $item['popular'] = (bool) $item['popular'];
+    $item['daily_special'] = (bool) $item['daily_special'];
+    $item['stock_enabled'] = (bool) ($item['stock_enabled'] ?? false);
+    $item['stock_qty'] = (int) ($item['stock_qty'] ?? 0);
+    $item['low_stock_threshold'] = (int) ($item['low_stock_threshold'] ?? 3);
+    $options = app_menu_options([$item['id']]);
+    $item['options'] = $options[$item['id']] ?? [];
     return $item;
 }

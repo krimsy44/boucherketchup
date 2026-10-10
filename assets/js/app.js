@@ -6,6 +6,9 @@ const state = {
   currentCategory: 'all',
   sort: 'popular',
   cart: [],
+  posCart: [],
+  posCategory: 'all',
+  posSearch: '',
   deliveryStaff: [],
   driverPhone: localStorage.getItem('ck_driver_phone') || '',
   driverCode: '',
@@ -15,6 +18,12 @@ const state = {
   customers: [],
   users: [],
   auditLogs: [],
+<<<<<<< HEAD
+=======
+  operations: null,
+  kitchenOrders: [],
+  reviews: [],
+>>>>>>> 5f92b50 (mise a jour)
   stats: null,
   checks: [],
   token: localStorage.getItem('ck_token') || '',
@@ -24,6 +33,54 @@ const state = {
 const money = (value) => `${Number(value).toLocaleString('fr-FR')} CFA`;
 const qs = (selector, root = document) => root.querySelector(selector);
 const qsa = (selector, root = document) => [...root.querySelectorAll(selector)];
+let toastTimer = null;
+let menuPreviewObjectUrl = '';
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
+}
+
+function resetForm(selectorOrForm) {
+  const form = typeof selectorOrForm === 'string' ? qs(selectorOrForm) : selectorOrForm;
+  if (!form || typeof form.reset !== 'function') return null;
+  form.reset();
+  return form;
+}
+
+function setMenuImagePreview(src = '', label = '') {
+  const preview = qs('#menu-image-preview');
+  const image = qs('#menu-image-preview img');
+  const text = qs('#menu-image-preview-text');
+  if (!preview || !image || !text) return;
+
+  if (menuPreviewObjectUrl && menuPreviewObjectUrl !== src) {
+    URL.revokeObjectURL(menuPreviewObjectUrl);
+    menuPreviewObjectUrl = '';
+  }
+
+  const cleanSrc = String(src || '').trim();
+  preview.hidden = cleanSrc === '';
+  image.src = cleanSrc;
+  text.textContent = cleanSrc ? label : '';
+}
+
+function syncMenuImagePreview() {
+  const form = qs('#menu-form');
+  if (!form) return;
+
+  const file = form.elements.image_file?.files?.[0];
+  if (file) {
+    if (menuPreviewObjectUrl) URL.revokeObjectURL(menuPreviewObjectUrl);
+    menuPreviewObjectUrl = URL.createObjectURL(file);
+    setMenuImagePreview(menuPreviewObjectUrl, file.name);
+    return;
+  }
+
+  const url = form.elements.image_url?.value || '';
+  setMenuImagePreview(url, url);
+}
 
 async function api(resource, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
@@ -39,11 +96,60 @@ async function api(resource, options = {}) {
   return payload;
 }
 
-function toast(message) {
+function toast(message, type = 'info') {
   const el = qs('#toast');
+  if (!el) {
+    console[type === 'error' ? 'error' : 'log'](message);
+    return;
+  }
   el.textContent = message;
+  el.classList.remove('success', 'error', 'info');
+  el.classList.add(type);
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 3200);
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), type === 'error' ? 5200 : 3600);
+}
+
+function checkoutNotice(message = '', type = 'info') {
+  const el = qs('#checkout-notice');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove('show', 'success', 'error', 'info');
+  if (message) el.classList.add('show', type);
+}
+
+const socialPlatforms = [
+  ['restaurant_whatsapp', 'WhatsApp', 'WA', 'assets/img/social-whatsapp.svg', (value) => `https://wa.me/${value.replace(/\D/g, '')}`],
+  ['social_instagram', 'Instagram', 'IG', 'assets/img/social-instagram.svg'],
+  ['social_tiktok', 'TikTok', 'TT'],
+  ['social_facebook', 'Facebook', 'f'],
+  ['social_youtube', 'YouTube', 'YT'],
+];
+
+function inlineNotice(selector, message = '', type = 'info') {
+  const el = qs(selector);
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove('show', 'success', 'error', 'info');
+  if (message) el.classList.add('show', type);
+}
+
+function renderSocialLinks(settings = state.operations?.settings || {}) {
+  const targets = qsa('[data-social-links]');
+  if (!targets.length) return;
+  const links = socialPlatforms
+    .map(([key, label, logo, icon, resolver]) => {
+      const value = String(settings[key] || '').trim();
+      const url = typeof resolver === 'function' ? resolver(value) : value;
+      return { label, logo, icon, url };
+    })
+    .filter((entry) => entry.url && entry.url !== 'https://wa.me/');
+  const html = links.length
+    ? links.map((entry) => `<a href="${escapeHtml(entry.url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(entry.label)}" title="${escapeHtml(entry.label)}" data-logo="${entry.icon ? '' : entry.logo}">${entry.icon ? `<img src="${entry.icon}" alt="" loading="lazy">` : escapeHtml(entry.label)}</a>`).join('')
+    : '<span class="muted">Réseaux sociaux bientôt disponibles.</span>';
+  targets.forEach((target) => {
+    target.innerHTML = html;
+  });
 }
 
 function showPage(page) {
@@ -55,6 +161,10 @@ function showPage(page) {
   if (page === 'admin' && state.token) loadAdmin();
   if (page === 'driver' && state.driverPhone && state.driverCode) loadDriverDashboard().catch((error) => toast(error.message));
   window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  const url = new URL(window.location);
+  url.searchParams.set('page', page);
+  history.pushState(null, '', url);
 }
 
 function showLogin() {
@@ -65,6 +175,7 @@ function showLogin() {
   qs('#login-form').classList.remove('hidden');
   qs('#admin-content').classList.add('hidden');
   qs('#logout-admin').classList.add('hidden');
+  qs('#admin-nav')?.classList.add('hidden');
   qs('#admin-user').textContent = 'Connectez-vous pour gérer les commandes.';
 }
 
@@ -89,9 +200,12 @@ function applyRoleUI() {
   qsa('[data-permission]').forEach((el) => {
     el.classList.toggle('hidden', !can(el.dataset.permission));
   });
-  qs('[data-admin-tab="menu"]').classList.toggle('hidden', !can('can_manage_menu'));
-  qs('[data-admin-tab="delivery"]').classList.toggle('hidden', !can('can_manage_delivery'));
-  qs('[data-admin-tab="stats"]').classList.toggle('hidden', !can('can_view_stats'));
+  qs('[data-admin-tab="menu"]')?.classList.toggle('hidden', !can('can_manage_menu'));
+  qs('[data-admin-tab="delivery"]')?.classList.toggle('hidden', !can('can_manage_delivery'));
+  qs('[data-admin-tab="operations"]')?.classList.toggle('hidden', !can('can_manage_operations'));
+  qs('[data-admin-tab="stats"]')?.classList.toggle('hidden', !can('can_view_stats'));
+  qs('[data-admin-tab="audit"]')?.classList.toggle('hidden', !can('can_view_stats'));
+  qs('[data-admin-tab="users"]')?.classList.toggle('hidden', !can('can_manage_users'));
 }
 
 function categoryLabel(id) {
@@ -106,25 +220,41 @@ function sortedItems(items) {
   return [...items].sort((a, b) => {
     if (state.sort === 'price-asc') return a.price - b.price;
     if (state.sort === 'price-desc') return b.price - a.price;
+    if (Number(b.daily_special) !== Number(a.daily_special)) return Number(b.daily_special) - Number(a.daily_special);
     return Number(b.popular) - Number(a.popular);
   });
 }
 
 function foodCard(item) {
+<<<<<<< HEAD
   const media = item.image_url
     ? `<img class="food-img" src="${item.image_url}" alt="${item.name}" loading="lazy">`
     : `<div class="food-emoji">${item.emoji}</div>`;
   const action = item.available
     ? `<button class="add" data-add="${item.id}" aria-label="Ajouter ${item.name} au panier">+</button>`
+=======
+  const options = (item.options || []).length
+    ? `<div class="option-list">${item.options.map((option) => `
+        <label><input type="checkbox" data-option="${item.id}" value="${option.id}"> ${escapeHtml(option.name)}${Number(option.price_delta) ? ` +${money(option.price_delta)}` : ''}</label>
+      `).join('')}</div>`
+    : '';
+  const media = item.image_url
+    ? `<img class="food-img" src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name)}" loading="lazy">`
+    : `<div class="food-emoji">${escapeHtml(item.emoji)}</div>`;
+  const action = item.available
+    ? `<button class="add" data-add="${item.id}" aria-label="Ajouter ${escapeHtml(item.name)} au panier">+</button>`
+>>>>>>> 5f92b50 (mise a jour)
     : '<span class="unavailable-badge">Indisponible</span>';
 
   return `
     <article class="food-card ${item.available ? '' : 'is-unavailable'}">
       ${media}
       <div class="food-body">
-        <div class="food-meta">${categoryLabel(item.category)}</div>
-        <strong>${item.name}</strong>
-        <p>${item.description}</p>
+        <div class="food-meta">${item.daily_special ? '<span class="daily-badge">Plat du jour</span>' : escapeHtml(categoryLabel(item.category))}</div>
+        <strong>${escapeHtml(item.name)}</strong>
+        <p>${escapeHtml(item.description)}</p>
+        ${item.stock_enabled && item.stock_qty <= item.low_stock_threshold ? '<span class="badge pay-pending">Stock limite</span>' : ''}
+        ${options}
         <div class="food-actions">
           <span class="price">${priceLabel(item)}</span>
           ${action}
@@ -134,25 +264,35 @@ function foodCard(item) {
 }
 
 function renderFeatured() {
-  const featured = state.menu.filter((item) => item.popular).slice(0, 8);
+  const featured = sortedItems(state.menu.filter((item) => item.popular)).slice(0, 8);
   qs('#featured-grid').innerHTML = featured.map(foodCard).join('');
-  qs('#featured-board').innerHTML = featured.slice(0, 4).map((item) => `
+  const boardItems = sortedItems(state.menu.filter((item) => item.daily_special || item.popular)).slice(0, 4);
+  qs('#featured-board').innerHTML = boardItems.map((item) => `
     <button class="hero-card" data-add="${item.id}">
-      <span class="emoji">${item.emoji}</span>
+      <span class="emoji">${escapeHtml(item.emoji)}</span>
       <span>
-        <small class="muted">${categoryLabel(item.category)}</small>
-        <strong>${item.name}</strong>
+        <small class="muted">${item.daily_special ? 'Plat du jour' : escapeHtml(categoryLabel(item.category))}</small>
+        <strong>${escapeHtml(item.name)}</strong>
         <span class="price">${priceLabel(item)}</span>
       </span>
     </button>
   `).join('');
 }
 
+function renderDailySpecials() {
+  const section = qs('#daily-specials-grid')?.closest('.section');
+  const grid = qs('#daily-specials-grid');
+  if (!section || !grid) return;
+  const specials = sortedItems(state.menu.filter((item) => item.daily_special && item.available)).slice(0, 3);
+  section.classList.toggle('hidden', specials.length === 0);
+  grid.innerHTML = specials.map(foodCard).join('');
+}
+
 function renderCategories() {
   const categories = [{ id: 'all', name: 'Tous' }, ...state.categories];
   qs('#category-list').innerHTML = categories.map((category) => `
     <button class="${state.currentCategory === category.id ? 'active' : ''}" data-category="${category.id}">
-      ${category.name}
+      ${escapeHtml(category.name)}
     </button>
   `).join('');
 }
@@ -165,23 +305,37 @@ function renderMenu() {
   qs('#menu-grid').innerHTML = sortedItems(items).map(foodCard).join('');
 }
 
-function addToCart(id) {
+function cartKey(id, options = []) {
+  return `${id}:${[...options].map(Number).sort((a, b) => a - b).join(',')}`;
+}
+
+function selectedOptionsFor(id, source) {
+  const card = source?.closest?.('.food-card');
+  if (!card) return [];
+  return qsa(`[data-option="${id}"]:checked`, card).map((input) => Number(input.value));
+}
+
+function addToCart(id, source = null) {
   const item = state.menu.find((entry) => Number(entry.id) === Number(id));
   if (!item || !item.available) return;
 
-  const existing = state.cart.find((line) => Number(line.id) === Number(id));
+  const options = selectedOptionsFor(id, source);
+  const optionRows = options.map((optionId) => (item.options || []).find((option) => Number(option.id) === Number(optionId))).filter(Boolean);
+  const price = item.price + optionRows.reduce((sum, option) => sum + Number(option.price_delta), 0);
+  const key = cartKey(id, options);
+  const existing = state.cart.find((line) => line.key === key);
   if (existing) existing.qty += 1;
-  else state.cart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
+  else state.cart.push({ key, id: item.id, name: item.name, price, qty: 1, options, option_names: optionRows.map((option) => option.name) });
 
   renderCart();
   toast(`${item.name} ajouté au panier.`);
 }
 
-function updateQty(id, delta) {
-  const line = state.cart.find((item) => Number(item.id) === Number(id));
+function updateQty(key, delta) {
+  const line = state.cart.find((item) => item.key === key);
   if (!line) return;
   line.qty += delta;
-  if (line.qty <= 0) state.cart = state.cart.filter((item) => Number(item.id) !== Number(id));
+  if (line.qty <= 0) state.cart = state.cart.filter((item) => item.key !== key);
   renderCart();
 }
 
@@ -189,21 +343,72 @@ function cartTotal() {
   return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
 }
 
+function posTotal() {
+  return state.posCart.reduce((sum, item) => sum + item.price * item.qty, 0);
+}
+
+function selectedZone() {
+  const id = Number(qs('#delivery-zone')?.value || 0);
+  return (state.operations?.zones || []).find((zone) => Number(zone.id) === id) || null;
+}
+
+function currentFulfillment() {
+  return qs('#checkout-form')?.elements.fulfillment?.value || 'delivery';
+}
+
+function datetimeLocalValue(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function updateScheduleBounds() {
+  const input = qs('#scheduled-at');
+  if (!input) return;
+  const min = new Date(Date.now() + 30 * 60 * 1000);
+  const max = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  input.min = datetimeLocalValue(min);
+  input.max = datetimeLocalValue(max);
+}
+
+function syncScheduleFields() {
+  updateScheduleBounds();
+  const mode = qs('#schedule-mode')?.value || 'asap';
+  const field = qs('#scheduled-at-field');
+  const input = qs('#scheduled-at');
+  if (field) field.classList.toggle('hidden', mode !== 'later');
+  if (input) {
+    input.required = mode === 'later';
+    if (mode !== 'later') input.value = '';
+  }
+}
+
+function cartSummary() {
+  const subtotal = cartTotal();
+  const fulfillment = currentFulfillment();
+  const zone = fulfillment === 'delivery' ? selectedZone() : null;
+  const deliveryFee = zone ? Number(zone.fee) : 0;
+  return { subtotal, deliveryFee, total: subtotal + deliveryFee };
+}
+
 function renderCart() {
+  const summary = cartSummary();
   qs('#cart-count').textContent = state.cart.reduce((sum, item) => sum + item.qty, 0);
-  qs('#cart-total').textContent = money(cartTotal());
+  qs('#cart-total').textContent = money(summary.total);
+  if (qs('#cart-subtotal')) qs('#cart-subtotal').textContent = money(summary.subtotal);
+  if (qs('#cart-delivery-fee')) qs('#cart-delivery-fee').textContent = money(summary.deliveryFee);
 
   qs('#cart-items').innerHTML = state.cart.length
     ? state.cart.map((item) => `
       <div class="cart-line">
         <div>
-          <strong>${item.name}</strong>
+          <strong>${escapeHtml(item.name)}</strong>
+          ${item.option_names?.length ? `<div class="muted">${item.option_names.map((n) => escapeHtml(n)).join(', ')}</div>` : ''}
           <div class="muted">${money(item.price * item.qty)}</div>
         </div>
         <div class="qty">
-          <button data-qty="${item.id}" data-delta="-1">-</button>
+          <button data-qty="${item.key}" data-delta="-1">-</button>
           <span>${item.qty}</span>
-          <button data-qty="${item.id}" data-delta="1">+</button>
+          <button data-qty="${item.key}" data-delta="1">+</button>
         </div>
       </div>
     `).join('')
@@ -253,7 +458,94 @@ function paymentHint(order) {
 }
 
 function orderItemsText(order) {
-  return order.items.map((item) => `${item.name} x${item.qty}`).join(', ');
+  return order.items.map((item) => `${item.name}${item.options_text ? ` (${item.options_text})` : ''} x${item.qty}`).join(', ');
+}
+
+function renderPosCategories() {
+  const select = qs('#pos-category');
+  if (!select) return;
+  const categories = [{ id: 'all', name: 'Toutes categories' }, ...state.categories];
+  select.innerHTML = categories.map((category) => `
+    <option value="${category.id}" ${state.posCategory === category.id ? 'selected' : ''}>${escapeHtml(category.name)}</option>
+  `).join('');
+}
+
+function renderPos() {
+  const grid = qs('#pos-grid');
+  if (!grid) return;
+  renderPosCategories();
+  const query = state.posSearch.trim().toLowerCase();
+  const items = sortedItems(state.menu)
+    .filter((item) => item.available)
+    .filter((item) => state.posCategory === 'all' || item.category === state.posCategory)
+    .filter((item) => !query || `${item.name} ${item.description || ''}`.toLowerCase().includes(query));
+  grid.innerHTML = items.length
+    ? items.map((item) => `
+      <button class="pos-item" type="button" data-pos-add="${item.id}">
+        <strong>${escapeHtml(item.name)}</strong>
+        <small class="muted">${escapeHtml(categoryLabel(item.category))}</small>
+        <span class="price">${priceLabel(item)}</span>
+      </button>
+    `).join('')
+    : '<p class="muted">Aucun plat disponible.</p>';
+  renderPosTicket();
+}
+
+function renderPosTicket() {
+  const lines = qs('#pos-lines');
+  if (!lines) return;
+  lines.innerHTML = state.posCart.length
+    ? state.posCart.map((item) => `
+      <div class="cart-line">
+        <div>
+          <strong>${escapeHtml(item.name)}</strong>
+          <div class="muted">${money(item.price)} x ${item.qty}</div>
+        </div>
+        <div class="qty">
+          <button type="button" data-pos-qty="${item.id}" data-delta="-1">-</button>
+          <span>${item.qty}</span>
+          <button type="button" data-pos-qty="${item.id}" data-delta="1">+</button>
+        </div>
+      </div>
+    `).join('')
+    : '<p class="muted">Aucun article sur le ticket.</p>';
+
+  const total = posTotal();
+  const received = Number(qs('#pos-amount-received')?.value || 0);
+  if (qs('#pos-total')) qs('#pos-total').textContent = money(total);
+  if (qs('#pos-change')) qs('#pos-change').textContent = money(Math.max(0, received - total));
+}
+
+function addToPos(id) {
+  const item = state.menu.find((entry) => Number(entry.id) === Number(id));
+  if (!item || !item.available) return;
+  const existing = state.posCart.find((line) => Number(line.id) === Number(item.id));
+  if (existing) existing.qty += 1;
+  else state.posCart.push({ id: item.id, name: item.name, price: Number(item.price), qty: 1 });
+  inlineNotice('#pos-notice');
+  renderPosTicket();
+}
+
+function updatePosQty(id, delta) {
+  const line = state.posCart.find((item) => Number(item.id) === Number(id));
+  if (!line) return;
+  line.qty += delta;
+  if (line.qty <= 0) state.posCart = state.posCart.filter((item) => Number(item.id) !== Number(id));
+  renderPosTicket();
+}
+
+function clearPosTicket() {
+  state.posCart = [];
+  resetForm('#pos-form');
+  const form = qs('#pos-form');
+  if (form) {
+    form.elements.name.value = 'Client comptoir';
+    form.elements.phone.value = '000000000';
+    form.elements.status.value = 'prep';
+    form.elements.payment_method.value = 'cash';
+  }
+  inlineNotice('#pos-notice');
+  renderPosTicket();
 }
 
 function orderCard(order) {
@@ -264,15 +556,16 @@ function orderCard(order) {
     <article class="panel">
       <div class="section-head">
         <div>
-          <h3>${order.number}</h3>
-          <p class="muted">${order.customer_name} - ${order.phone}</p>
+          <h3>${escapeHtml(order.number)}</h3>
+          <p class="muted">${escapeHtml(order.customer_name)} - ${escapeHtml(order.phone)}</p>
         </div>
         <span class="badge ${order.status}">${statusLabel(order.status)}</span>
       </div>
-      <p>${orderItemsText(order)}</p>
+      <p>${escapeHtml(orderItemsText(order))}</p>
       <strong class="price">${money(order.total)}</strong>
+      ${order.scheduled_at ? `<p class="muted">Programme: ${new Date(order.scheduled_at).toLocaleString('fr-FR')}</p>` : ''}
       <p><span class="badge pay-${order.payment_status}">${paymentStatusLabel(order.payment_status)}</span></p>
-      <p class="muted">${paymentHint(order)}</p>
+      <p class="muted">${escapeHtml(paymentHint(order))}</p>
       <div class="timeline">
         ${steps.map((step, index) => `<span class="step ${index < activeIndex ? 'done' : index === activeIndex ? 'active' : ''}" title="${statusLabel(step)}"></span>`).join('')}
       </div>
@@ -364,15 +657,50 @@ function logoutDriver() {
   state.driverPhone = '';
   state.driverCode = '';
   localStorage.removeItem('ck_driver_phone');
+<<<<<<< HEAD
   qs('#driver-login-form').reset();
+=======
+  resetForm('#driver-login-form');
+>>>>>>> 5f92b50 (mise a jour)
   qs('#driver-dashboard').innerHTML = '';
   toast('Espace livreur ferme.');
 }
 
+<<<<<<< HEAD
+=======
+function renderCheckoutZones() {
+  const select = qs('#delivery-zone');
+  if (!select) return;
+  const zones = (state.operations?.zones || []).filter((zone) => zone.active);
+  select.disabled = zones.length === 0;
+  select.innerHTML = zones.length
+    ? zones.map((zone) => `
+      <option value="${zone.id}">${zone.name} - ${money(zone.fee)}${zone.minimum_order ? ` min. ${money(zone.minimum_order)}` : ''}</option>
+    `).join('')
+    : '<option value="">Aucune zone active</option>';
+  syncFulfillmentFields();
+}
+
+function syncFulfillmentFields() {
+  const fulfillment = currentFulfillment();
+  const zoneField = qs('#delivery-zone-field');
+  const address = qs('#checkout-form')?.elements.address;
+  if (zoneField) zoneField.classList.toggle('hidden', fulfillment !== 'delivery');
+  if (address) {
+    address.required = fulfillment === 'delivery';
+    address.placeholder = fulfillment === 'delivery' ? 'Quartier, rue ou point de repere' : 'Retrait sur place';
+  }
+  syncScheduleFields();
+  renderCart();
+}
+
+>>>>>>> 5f92b50 (mise a jour)
 async function submitOrder(event) {
   event.preventDefault();
+  checkoutNotice('');
   if (state.cart.length === 0) {
-    toast('Votre panier est vide.');
+    checkoutNotice('Votre panier est vide.', 'error');
+    toast('Votre panier est vide.', 'error');
     return;
   }
 
@@ -381,9 +709,33 @@ async function submitOrder(event) {
   const fulfillment = form.get('fulfillment');
   const address = String(form.get('address') || '').trim();
   if (fulfillment === 'delivery' && address === '') {
+<<<<<<< HEAD
     toast('Adresse obligatoire pour une livraison.');
     return;
   }
+=======
+    checkoutNotice('Adresse obligatoire pour une livraison.', 'error');
+    toast('Adresse obligatoire pour une livraison.', 'error');
+    return;
+  }
+  if (fulfillment === 'delivery' && !selectedZone()) {
+    checkoutNotice('Choisissez une zone de livraison.', 'error');
+    toast('Choisissez une zone de livraison.', 'error');
+    return;
+  }
+  const scheduleMode = form.get('schedule_mode') || 'asap';
+  const scheduledAt = scheduleMode === 'later' ? String(form.get('scheduled_at') || '') : '';
+  if (scheduleMode === 'later') {
+    const scheduledTime = new Date(scheduledAt).getTime();
+    const minTime = Date.now() + 30 * 60 * 1000;
+    const maxTime = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    if (!scheduledAt || Number.isNaN(scheduledTime) || scheduledTime < minTime || scheduledTime > maxTime) {
+      checkoutNotice('Choisissez une date entre 30 minutes et 7 jours.', 'error');
+      toast('Choisissez une date entre 30 minutes et 7 jours.', 'error');
+      return;
+    }
+  }
+>>>>>>> 5f92b50 (mise a jour)
 
   const body = {
     customer: {
@@ -393,8 +745,14 @@ async function submitOrder(event) {
       note: form.get('note'),
     },
     fulfillment,
+<<<<<<< HEAD
+=======
+    delivery_zone_id: fulfillment === 'delivery' ? Number(form.get('delivery_zone_id')) : null,
+    promo_code: form.get('promo_code') || '',
+    scheduled_at: scheduledAt,
+>>>>>>> 5f92b50 (mise a jour)
     payment_method: form.get('payment_method'),
-    items: state.cart.map((item) => ({ id: item.id, qty: item.qty })),
+    items: state.cart.map((item) => ({ id: item.id, qty: item.qty, options: item.options || [] })),
   };
 
   try {
@@ -402,21 +760,99 @@ async function submitOrder(event) {
       submitButton.disabled = true;
       submitButton.textContent = 'Validation...';
     }
+<<<<<<< HEAD
+=======
+    checkoutNotice('Envoi de la commande...', 'info');
+    toast('Envoi de la commande...', 'info');
+>>>>>>> 5f92b50 (mise a jour)
     const payload = await api('orders', { method: 'POST', body: JSON.stringify(body) });
     state.cart = [];
     renderCart();
-    event.currentTarget.reset();
+    resetForm(event.currentTarget);
+    syncFulfillmentFields();
+    syncScheduleFields();
     toggleCart(false);
-    toast(`Commande ${payload.order.number} enregistrée.`);
     showPage('tracking');
     qs('#tracking-results').innerHTML = orderCard(payload.order);
+    toast(`Commande ${payload.order.number} enregistrée.`, 'success');
   } catch (error) {
+<<<<<<< HEAD
     toast(error.message);
+=======
+    const message = error.message || 'Commande impossible. Vérifiez les informations.';
+    checkoutNotice(message, 'error');
+    toast(message, 'error');
+>>>>>>> 5f92b50 (mise a jour)
   } finally {
     if (submitButton) {
       submitButton.disabled = false;
       submitButton.textContent = 'Commander maintenant';
     }
+<<<<<<< HEAD
+=======
+  }
+}
+
+async function submitPosOrder(event) {
+  event.preventDefault();
+  inlineNotice('#pos-notice');
+  if (state.posCart.length === 0) {
+    inlineNotice('#pos-notice', 'Ajoutez au moins un article.', 'error');
+    return;
+  }
+
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const total = posTotal();
+  const received = Number(data.get('amount_received') || 0);
+  const method = String(data.get('payment_method') || 'cash');
+  if (method === 'cash' && received > 0 && received < total) {
+    inlineNotice('#pos-notice', 'Le montant reçu est inférieur au total.', 'error');
+    return;
+  }
+
+  const submitButton = form.querySelector('[type="submit"]');
+  try {
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = 'Encaissement...';
+    }
+    const payload = await api('admin/pos-order', {
+      method: 'POST',
+      body: JSON.stringify({
+        customer: {
+          name: data.get('name'),
+          phone: data.get('phone'),
+          address: 'Sur place',
+          note: data.get('note'),
+        },
+        fulfillment: 'pickup',
+        payment_method: method,
+        paid: true,
+        status: data.get('status'),
+        items: state.posCart.map((item) => ({ id: item.id, qty: item.qty })),
+      }),
+    });
+    inlineNotice('#pos-notice', `Commande ${payload.order.number} encaissée.`, 'success');
+    const notice = qs('#pos-notice');
+    if (notice) {
+      notice.innerHTML = `Commande ${payload.order.number} encaissée. <button class="secondary small" type="button" data-print-order="${payload.order.id}">Imprimer le ticket</button>`;
+    }
+    state.posCart = [];
+    renderPosTicket();
+    renderAdminTables(payload.orders);
+    renderCustomerList(payload.customers);
+    await loadCatalog();
+    renderPos();
+    printOrder(payload.order.id);
+  } catch (error) {
+    inlineNotice('#pos-notice', error.message, 'error');
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = 'Encaisser';
+    }
+>>>>>>> 5f92b50 (mise a jour)
   }
 }
 
@@ -456,6 +892,8 @@ async function login(event) {
 
 function renderAdminTables(orders) {
   state.adminOrders = orders;
+  const canManageDelivery = can('can_manage_delivery');
+  const canManagePayments = can('can_manage_payments');
   const deliveryOptions = (selectedId) => `
     <option value="">Non assignée</option>
     ${state.deliveryStaff.filter((driver) => driver.active && driver.status !== 'absent').map((driver) => `
@@ -484,14 +922,18 @@ function renderAdminTables(orders) {
             <option value="${status}" ${order.status === status ? 'selected' : ''}>${statusLabel(status)}</option>
           `).join('')}
         </select>
-        <select class="status-select" data-delivery-id="${order.id}">
-          ${deliveryOptions(order.delivery_staff_id)}
-        </select>
-        <select class="status-select" data-payment-id="${order.id}">
-          ${['pending', 'paid', 'failed', 'refunded'].map((status) => `
-            <option value="${status}" ${order.payment_status === status ? 'selected' : ''}>${paymentStatusLabel(status)}</option>
-          `).join('')}
-        </select>
+        ${canManageDelivery ? `
+          <select class="status-select" data-delivery-id="${order.id}">
+            ${deliveryOptions(order.delivery_staff_id)}
+          </select>
+        ` : ''}
+        ${canManagePayments ? `
+          <select class="status-select" data-payment-id="${order.id}">
+            ${['pending', 'paid', 'failed', 'refunded'].map((status) => `
+              <option value="${status}" ${order.payment_status === status ? 'selected' : ''}>${paymentStatusLabel(status)}</option>
+            `).join('')}
+          </select>
+        ` : ''}
         <button class="secondary small" data-print-order="${order.id}">Ticket</button>
         <button class="secondary small" data-notify-order="${order.id}" data-template="confirmation">Notif</button>
       </td>
@@ -508,12 +950,17 @@ function renderAdminTables(orders) {
 
 function renderAdminMenu() {
   renderMenuFormCategories();
+  const dailyCount = state.menu.filter((item) => item.daily_special && item.available).length;
+  if (qs('#daily-special-count')) {
+    qs('#daily-special-count').textContent = `${Math.min(dailyCount, 3)}/3 plats du jour affichés`;
+  }
   qs('#admin-menu-grid').innerHTML = state.menu.map((item) => `
     <article class="panel">
       ${item.image_url ? `<img class="admin-food-img" src="${item.image_url}" alt="${item.name}" loading="lazy">` : `<div class="food-emoji">${item.emoji}</div>`}
       <h3>${item.name}</h3>
-      <p class="muted">${categoryLabel(item.category)}</p>
+      <p class="muted">${categoryLabel(item.category)}${item.daily_special ? ' - Plat du jour' : ''}</p>
       <p class="muted">${item.description || ''}</p>
+      ${item.stock_enabled ? `<p class="muted">Stock: ${item.stock_qty} ${item.stock_qty <= item.low_stock_threshold ? '- alerte' : ''}</p>` : ''}
       <p class="price">${priceLabel(item)}</p>
       <label>
         Disponible
@@ -538,11 +985,13 @@ function renderMenuFormCategories() {
 }
 
 function resetMenuForm() {
-  const form = qs('#menu-form');
-  form.reset();
+  const form = resetForm('#menu-form');
+  if (!form) return;
   form.elements.id.value = '';
   form.elements.available.checked = true;
+  form.elements.daily_special.checked = false;
   form.elements.image_file.value = '';
+  setMenuImagePreview();
   qs('#menu-form-title').textContent = 'Ajouter un plat';
 }
 
@@ -556,12 +1005,18 @@ function editMenuItem(id) {
   form.elements.category.value = item.category;
   form.elements.price.value = item.price;
   form.elements.max_price.value = item.max_price || '';
+  form.elements.stock_qty.value = item.stock_qty || 0;
+  form.elements.low_stock_threshold.value = item.low_stock_threshold ?? 3;
   form.elements.emoji.value = item.emoji || '';
   form.elements.image_url.value = item.image_url || '';
   form.elements.image_file.value = '';
   form.elements.description.value = item.description || '';
+  form.elements.options_text.value = (item.options || []).map((option) => `${option.name}|${option.price_delta}`).join('\n');
   form.elements.available.checked = Boolean(item.available);
   form.elements.popular.checked = Boolean(item.popular);
+  form.elements.daily_special.checked = Boolean(item.daily_special);
+  form.elements.stock_enabled.checked = Boolean(item.stock_enabled);
+  syncMenuImagePreview();
   qs('#menu-form-title').textContent = `Modifier ${item.name}`;
   form.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -574,11 +1029,16 @@ function menuPayloadFromForm(form) {
     category: data.get('category'),
     price: Number(data.get('price')),
     max_price: data.get('max_price') ? Number(data.get('max_price')) : null,
+    stock_qty: Number(data.get('stock_qty') || 0),
+    low_stock_threshold: Number(data.get('low_stock_threshold') || 3),
     emoji: data.get('emoji') || '🍽️',
     image_url: data.get('image_url') || '',
     description: data.get('description') || '',
+    options_text: data.get('options_text') || '',
     available: form.elements.available.checked,
     popular: form.elements.popular.checked,
+    daily_special: form.elements.daily_special.checked,
+    stock_enabled: form.elements.stock_enabled.checked,
   };
 }
 
@@ -608,17 +1068,38 @@ async function uploadMenuImage(file) {
 async function saveMenuItem(event) {
   event.preventDefault();
   const body = menuPayloadFromForm(event.currentTarget);
+  if (body.daily_special) {
+    const currentDailyCount = state.menu.filter((item) => item.daily_special && Number(item.id) !== Number(body.id || 0)).length;
+    if (currentDailyCount >= 3) {
+      toast('Maximum 3 plats du jour. Décochez un autre plat avant.', 'error');
+      return;
+    }
+  }
   const imageFile = event.currentTarget.elements.image_file.files[0];
   const isUpdate = Boolean(body.id);
 
   try {
     if (imageFile) {
       body.image_url = await uploadMenuImage(imageFile);
+      event.currentTarget.elements.image_url.value = body.image_url;
+      event.currentTarget.elements.image_file.value = '';
+      syncMenuImagePreview();
     }
-    await api('admin/menu-items', {
+    const saved = await api('admin/menu-items', {
       method: isUpdate ? 'PUT' : 'POST',
       body: JSON.stringify(body),
     });
+    const menuItemId = body.id || saved.item?.id;
+    const options = String(body.options_text || '').split('\n').map((line) => {
+      const [name, price = '0'] = line.split('|');
+      return { name: (name || '').trim(), price_delta: Number(price || 0) };
+    }).filter((option) => option.name);
+    if (menuItemId) {
+      await api('admin/menu-options', {
+        method: 'PUT',
+        body: JSON.stringify({ menu_item_id: Number(menuItemId), options }),
+      });
+    }
     toast(isUpdate ? 'Plat modifié.' : 'Plat ajouté.');
     resetMenuForm();
     await loadCatalog();
@@ -702,6 +1183,90 @@ function renderDeliveryStaff() {
   `).join('');
 }
 
+<<<<<<< HEAD
+=======
+const dayLabels = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+
+function renderKitchenOrders(orders = state.kitchenOrders) {
+  state.kitchenOrders = orders;
+  const target = qs('#kitchen-grid');
+  if (!target) return;
+  target.innerHTML = orders.length ? orders.map((order) => `
+    <article class="panel kitchen-ticket">
+      <div class="section-head">
+        <h3>${order.number}</h3>
+        <span class="badge ${order.status}">${statusLabel(order.status)}</span>
+      </div>
+      <p class="muted">${new Date(order.created_at).toLocaleTimeString('fr-FR')} - ${order.customer_name}</p>
+      <p>${orderItemsText(order)}</p>
+      ${order.note ? `<p class="muted">${order.note}</p>` : ''}
+      <div class="actions">
+        <button class="secondary small" data-status-id="${order.id}" data-next-status="prep">En preparation</button>
+        <button class="primary small" data-status-id="${order.id}" data-next-status="delivery">Prete</button>
+      </div>
+    </article>
+  `).join('') : '<p class="muted">Aucune commande en cuisine.</p>';
+}
+
+function renderOperations(operations = state.operations) {
+  state.operations = operations;
+  if (!operations || !qs('#settings-form')) return;
+  const settingsForm = qs('#settings-form');
+  Object.entries(operations.settings || {}).forEach(([key, value]) => {
+    if (settingsForm.elements[key]) settingsForm.elements[key].value = value;
+  });
+  if (settingsForm.elements.orders_paused) {
+    settingsForm.elements.orders_paused.checked = (operations.settings?.orders_paused || '0') === '1';
+  }
+  qs('#hours-grid').innerHTML = (operations.hours || []).map((row, index) => `
+    <div class="hour-line">
+      <strong>${dayLabels[index] || row.weekday}</strong>
+      <input type="time" data-hour="${row.weekday}" data-field="open_time" value="${row.open_time}">
+      <input type="time" data-hour="${row.weekday}" data-field="close_time" value="${row.close_time}">
+      <label><input type="checkbox" data-hour="${row.weekday}" data-field="active" ${row.active ? 'checked' : ''}> Ouvert</label>
+    </div>
+  `).join('');
+  qs('#zones-grid').innerHTML = (operations.zones || []).map((zone) => `
+    <article class="panel">
+      <h3>${zone.name}</h3>
+      <p class="price">${money(zone.fee)}</p>
+      <p class="muted">Minimum ${money(zone.minimum_order)} - ${zone.estimated_minutes} min</p>
+      <p>${zone.active ? '<span class="badge done">Active</span>' : '<span class="badge pay-failed">Inactive</span>'}</p>
+      <button class="secondary small" data-edit-zone="${zone.id}">Modifier</button>
+    </article>
+  `).join('');
+  qs('#promos-table').innerHTML = tableHtml(
+    ['Code', 'Libelle', 'Reduction', 'Minimum', 'Statut', 'Actions'],
+    (operations.promos || []).map((promo) => [
+      promo.code,
+      promo.label,
+      promo.type === 'percent' ? `${promo.value}%` : money(promo.value),
+      money(promo.minimum_order),
+      promo.active ? '<span class="badge done">Actif</span>' : '<span class="badge pay-failed">Inactif</span>',
+      `<button class="secondary small" data-edit-promo="${promo.id}">Modifier</button>`,
+    ])
+  );
+  renderCheckoutZones();
+  renderSocialLinks(operations.settings || {});
+}
+
+function renderReviews(reviews = state.reviews) {
+  state.reviews = reviews;
+  const target = qs('#reviews-table');
+  if (!target) return;
+  target.innerHTML = tableHtml(
+    ['Date', 'Commande', 'Client', 'Note', 'Commentaire'],
+    reviews.map((review) => [
+      new Date(review.created_at).toLocaleString('fr-FR'),
+      review.number,
+      review.customer_name,
+      `${review.rating}/5`,
+      review.comment || '-',
+    ])
+  );
+}
+
+>>>>>>> 5f92b50 (mise a jour)
 function generatedSecret(length = 12) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
   const bytes = new Uint32Array(length);
@@ -711,8 +1276,8 @@ function generatedSecret(length = 12) {
 }
 
 function resetDeliveryForm() {
-  const form = qs('#delivery-form');
-  form.reset();
+  const form = resetForm('#delivery-form');
+  if (!form) return;
   form.elements.id.value = '';
   form.elements.access_code.value = '';
   form.elements.active.checked = true;
@@ -814,8 +1379,8 @@ function renderUsers(users = state.users) {
 }
 
 function resetUserForm() {
-  const form = qs('#user-form');
-  form.reset();
+  const form = resetForm('#user-form');
+  if (!form) return;
   form.elements.id.value = '';
   form.elements.active.checked = true;
   qs('#user-form-title').textContent = 'Ajouter un utilisateur';
@@ -908,6 +1473,124 @@ async function loadAuditLogs() {
   }
 }
 
+<<<<<<< HEAD
+=======
+async function loadOperations() {
+  if (!can('can_manage_operations')) return;
+  try {
+    const payload = await api('admin/operations');
+    renderOperations(payload.operations);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function loadKitchen() {
+  try {
+    const payload = await api('admin/kitchen');
+    renderKitchenOrders(payload.orders);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function loadReviews() {
+  try {
+    const payload = await api('admin/reviews');
+    renderReviews(payload.reviews);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const payload = {};
+  ['restaurant_name', 'restaurant_phone', 'restaurant_whatsapp', 'restaurant_address', 'pickup_eta_minutes', ...socialPlatforms.map(([key]) => key)].forEach((key) => {
+    payload[key] = data.get(key) || '';
+  });
+  payload.orders_paused = form.elements.orders_paused.checked;
+  const response = await api('admin/settings', { method: 'PATCH', body: JSON.stringify(payload) });
+  renderOperations(response.operations);
+  toast('Parametres enregistres.');
+}
+
+async function saveHours(event) {
+  event.preventDefault();
+  const hours = dayLabels.map((_, index) => {
+    const weekday = index + 1;
+    return {
+      weekday,
+      open_time: qs(`[data-hour="${weekday}"][data-field="open_time"]`).value,
+      close_time: qs(`[data-hour="${weekday}"][data-field="close_time"]`).value,
+      active: qs(`[data-hour="${weekday}"][data-field="active"]`).checked,
+    };
+  });
+  const response = await api('admin/business-hours', { method: 'PUT', body: JSON.stringify({ hours }) });
+  renderOperations(response.operations);
+  toast('Horaires enregistres.');
+}
+
+async function saveZone(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const body = {
+    id: data.get('id') ? Number(data.get('id')) : undefined,
+    name: data.get('name'),
+    fee: Number(data.get('fee')),
+    minimum_order: Number(data.get('minimum_order') || 0),
+    estimated_minutes: Number(data.get('estimated_minutes') || 45),
+    active: form.elements.active.checked,
+  };
+  const response = await api('admin/delivery-zones', { method: body.id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+  resetForm(form);
+  form.elements.id.value = '';
+  form.elements.active.checked = true;
+  renderOperations(response.operations);
+  toast('Zone enregistree.');
+}
+
+async function savePromo(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const body = {
+    id: data.get('id') ? Number(data.get('id')) : undefined,
+    code: data.get('code'),
+    label: data.get('label'),
+    type: data.get('type'),
+    value: Number(data.get('value')),
+    minimum_order: Number(data.get('minimum_order') || 0),
+    active: form.elements.active.checked,
+  };
+  const response = await api('admin/promo-codes', { method: body.id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+  resetForm(form);
+  form.elements.id.value = '';
+  form.elements.active.checked = true;
+  renderOperations(response.operations);
+  toast('Code promo enregistre.');
+}
+
+async function submitReview(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  await api('reviews', {
+    method: 'POST',
+    body: JSON.stringify({
+      order_number: data.get('order_number'),
+      phone: data.get('phone'),
+      rating: Number(data.get('rating')),
+      comment: data.get('comment') || '',
+    }),
+  });
+  resetForm(event.currentTarget);
+  toast('Merci pour votre avis.');
+}
+
+>>>>>>> 5f92b50 (mise a jour)
 async function updateContactMessageStatus(id, handled) {
   try {
     const payload = await api('admin/contact-message-status', {
@@ -1024,6 +1707,7 @@ async function loadSystemChecks() {
 }
 
 async function loadStats() {
+  if (!can('can_view_stats')) return;
   try {
     const payload = await api('admin/stats');
     renderStats(payload);
@@ -1094,9 +1778,15 @@ async function loadAdmin() {
     qs('#login-form').classList.add('hidden');
     qs('#admin-content').classList.remove('hidden');
     qs('#logout-admin').classList.remove('hidden');
-    qs('#admin-user').textContent = `${state.user.name} - ${state.user.role}`;
+    qs('#admin-nav')?.classList.remove('hidden');
+    qs('#admin-user').textContent = `${state.user.name} - ${roleLabel(state.user.role)}`;
     applyRoleUI();
     state.deliveryStaff = payload.delivery_staff || [];
+<<<<<<< HEAD
+=======
+    renderOperations(payload.operations || state.operations);
+    renderKitchenOrders(payload.kitchen_orders || []);
+>>>>>>> 5f92b50 (mise a jour)
     renderSystemChecks(payload.checks || []);
 
     qs('#kpi-grid').innerHTML = `
@@ -1108,14 +1798,23 @@ async function loadAdmin() {
       <div class="kpi"><span>Payé aujourd'hui</span><strong>${money(payload.summary.payments_paid_today)}</strong></div>
     `;
     renderAdminTables(payload.orders);
+    renderPos();
     renderAdminMenu();
     renderDeliveryStaff();
     await loadCustomers();
     await loadContactMessages();
-    await loadStats();
+    if (can('can_manage_operations')) await loadOperations();
+    await loadKitchen();
+    await loadReviews();
+    if (can('can_view_stats')) await loadStats();
     await loadNotifications();
+<<<<<<< HEAD
     await loadUsers();
     await loadAuditLogs();
+=======
+    if (can('can_manage_users')) await loadUsers();
+    if (can('can_view_stats')) await loadAuditLogs();
+>>>>>>> 5f92b50 (mise a jour)
   } catch (error) {
     showLogin();
     toast(error.message);
@@ -1315,8 +2014,18 @@ async function loadCatalog() {
   const payload = await api('catalog');
   state.categories = payload.categories;
   state.menu = payload.items;
+  state.operations = {
+    settings: payload.settings || {},
+    hours: payload.hours || [],
+    zones: payload.zones || [],
+    open_state: payload.open_state || { open: true },
+  };
+  renderCheckoutZones();
   renderFeatured();
+  renderDailySpecials();
   renderMenu();
+  renderPos();
+  renderSocialLinks(state.operations.settings);
 }
 
 function bindEvents() {
@@ -1325,7 +2034,7 @@ function bindEvents() {
     if (pageButton) showPage(pageButton.dataset.page);
 
     const addButton = event.target.closest('[data-add]');
-    if (addButton) addToCart(addButton.dataset.add);
+    if (addButton) addToCart(addButton.dataset.add, addButton);
 
     const categoryButton = event.target.closest('[data-category]');
     if (categoryButton) {
@@ -1336,15 +2045,30 @@ function bindEvents() {
     const qtyButton = event.target.closest('[data-qty]');
     if (qtyButton) updateQty(qtyButton.dataset.qty, Number(qtyButton.dataset.delta));
 
+    const posAddButton = event.target.closest('[data-pos-add]');
+    if (posAddButton) addToPos(posAddButton.dataset.posAdd);
+
+    const posQtyButton = event.target.closest('[data-pos-qty]');
+    if (posQtyButton) updatePosQty(posQtyButton.dataset.posQty, Number(posQtyButton.dataset.delta));
+
+    if (event.target.closest('[data-pos-clear]')) clearPosTicket();
+
     const adminTab = event.target.closest('[data-admin-tab]');
     if (adminTab) {
       qsa('[data-admin-tab]').forEach((el) => el.classList.toggle('active', el === adminTab));
       qsa('.admin-tab').forEach((el) => el.classList.remove('active'));
       qs(`#admin-${adminTab.dataset.adminTab}`).classList.add('active');
       if (adminTab.dataset.adminTab === 'stats') loadStats();
+      if (adminTab.dataset.adminTab === 'pos') renderPos();
       if (adminTab.dataset.adminTab === 'notifications') loadNotifications();
       if (adminTab.dataset.adminTab === 'clients') loadCustomers();
       if (adminTab.dataset.adminTab === 'audit') loadAuditLogs();
+<<<<<<< HEAD
+=======
+      if (adminTab.dataset.adminTab === 'operations') loadOperations();
+      if (adminTab.dataset.adminTab === 'kitchen') loadKitchen();
+      if (adminTab.dataset.adminTab === 'reviews') loadReviews();
+>>>>>>> 5f92b50 (mise a jour)
       if (adminTab.dataset.adminTab === 'messages') loadContactMessages();
       if (adminTab.dataset.adminTab === 'users') loadUsers();
     }
@@ -1370,6 +2094,42 @@ function bindEvents() {
     if (event.target.closest('[data-system-check]')) loadSystemChecks();
 
     if (event.target.closest('[data-audit-refresh]')) loadAuditLogs();
+<<<<<<< HEAD
+=======
+    if (event.target.closest('[data-kitchen-refresh]')) loadKitchen();
+
+    const nextStatus = event.target.closest('[data-next-status]');
+    if (nextStatus) updateStatus(nextStatus.dataset.statusId, nextStatus.dataset.nextStatus);
+
+    const editZoneButton = event.target.closest('[data-edit-zone]');
+    if (editZoneButton) {
+      const zone = (state.operations?.zones || []).find((entry) => Number(entry.id) === Number(editZoneButton.dataset.editZone));
+      const form = qs('#zone-form');
+      if (zone && form) {
+        form.elements.id.value = zone.id;
+        form.elements.name.value = zone.name;
+        form.elements.fee.value = zone.fee;
+        form.elements.minimum_order.value = zone.minimum_order;
+        form.elements.estimated_minutes.value = zone.estimated_minutes;
+        form.elements.active.checked = Boolean(zone.active);
+      }
+    }
+
+    const editPromoButton = event.target.closest('[data-edit-promo]');
+    if (editPromoButton) {
+      const promo = (state.operations?.promos || []).find((entry) => Number(entry.id) === Number(editPromoButton.dataset.editPromo));
+      const form = qs('#promo-form');
+      if (promo && form) {
+        form.elements.id.value = promo.id;
+        form.elements.code.value = promo.code;
+        form.elements.label.value = promo.label;
+        form.elements.type.value = promo.type;
+        form.elements.value.value = promo.value;
+        form.elements.minimum_order.value = promo.minimum_order;
+        form.elements.active.checked = Boolean(promo.active);
+      }
+    }
+>>>>>>> 5f92b50 (mise a jour)
 
     if (event.target.closest('[data-generate-delivery-code]')) {
       const code = generatedSecret(8);
@@ -1414,13 +2174,52 @@ function bindEvents() {
   qs('#scrim').addEventListener('click', () => toggleCart(false));
   qs('#logout-admin').addEventListener('click', logoutAdmin);
   qs('#checkout-form').addEventListener('submit', submitOrder);
+  qs('#checkout-form').elements.fulfillment.addEventListener('change', syncFulfillmentFields);
+  qs('#delivery-zone')?.addEventListener('change', renderCart);
+  qs('#schedule-mode')?.addEventListener('change', syncScheduleFields);
+  qs('#scheduled-at')?.addEventListener('focus', updateScheduleBounds);
   qs('#tracking-form').addEventListener('submit', trackOrder);
+<<<<<<< HEAD
+=======
+  qs('#review-form')?.addEventListener('submit', (event) => submitReview(event).catch((error) => toast(error.message)));
+>>>>>>> 5f92b50 (mise a jour)
   qs('#driver-login-form').addEventListener('submit', submitDriverLogin);
   qs('#login-form').addEventListener('submit', login);
+  qs('#pos-form')?.addEventListener('submit', submitPosOrder);
+  qs('#pos-search')?.addEventListener('input', (event) => {
+    state.posSearch = event.target.value;
+    renderPos();
+  });
+  qs('#pos-category')?.addEventListener('change', (event) => {
+    state.posCategory = event.target.value;
+    renderPos();
+  });
+  qs('#pos-amount-received')?.addEventListener('input', renderPosTicket);
   qs('#menu-form').addEventListener('submit', saveMenuItem);
   qs('#menu-form-reset').addEventListener('click', resetMenuForm);
+  qs('#menu-form').elements.image_url.addEventListener('input', syncMenuImagePreview);
+  qs('#menu-form').elements.image_file.addEventListener('change', syncMenuImagePreview);
   qs('#delivery-form').addEventListener('submit', saveDeliveryStaff);
   qs('#delivery-form-reset').addEventListener('click', resetDeliveryForm);
+<<<<<<< HEAD
+=======
+  qs('#settings-form')?.addEventListener('submit', (event) => saveSettings(event).catch((error) => toast(error.message)));
+  qs('#hours-form')?.addEventListener('submit', (event) => saveHours(event).catch((error) => toast(error.message)));
+  qs('#zone-form')?.addEventListener('submit', (event) => saveZone(event).catch((error) => toast(error.message)));
+  qs('#zone-form-reset')?.addEventListener('click', () => {
+    const form = resetForm('#zone-form');
+    if (!form) return;
+    form.elements.id.value = '';
+    form.elements.active.checked = true;
+  });
+  qs('#promo-form')?.addEventListener('submit', (event) => savePromo(event).catch((error) => toast(error.message)));
+  qs('#promo-form-reset')?.addEventListener('click', () => {
+    const form = resetForm('#promo-form');
+    if (!form) return;
+    form.elements.id.value = '';
+    form.elements.active.checked = true;
+  });
+>>>>>>> 5f92b50 (mise a jour)
   qs('#notification-test-form').addEventListener('submit', sendNotificationTest);
   qs('#user-form').addEventListener('submit', saveUser);
   qs('#user-form-reset').addEventListener('click', resetUserForm);
@@ -1437,7 +2236,7 @@ function bindEvents() {
           message: data.get('message'),
         }),
       });
-      form.reset();
+      resetForm(form);
       toast('Message reçu. Nous vous recontactons rapidement.');
     } catch (error) {
       toast(error.message);

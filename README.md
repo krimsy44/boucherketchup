@@ -27,6 +27,7 @@ Les comptes initiaux utilisent le mot de passe `ADMIN_PASSWORD` defini dans `.en
 - Panier et creation de commande
 - Suivi par numero de commande ou telephone
 - Back-office avec connexion, commandes, menu, clients et indicateurs
+- Systeme de caisse sur place pour saisir une vente comptoir, encaisser et imprimer le ticket
 - Gestion des livreurs internes et assignation aux commandes
 - Ajout, modification, activation et indisponibilite des livreurs
 - Tableau de bord livreur dedie par telephone + code avec courses assignees et mise a jour livraison / livre
@@ -45,6 +46,7 @@ Les comptes initiaux utilisent le mot de passe `ADMIN_PASSWORD` defini dans `.en
 - Limitation des tentatives de connexion admin et livreur avec blocage temporaire
 - Journal d'audit back-office : utilisateurs, commandes, paiements, livreurs et notifications de test
 - Formulaire contact relie au back-office avec suivi traite / nouveau
+- Liens reseaux sociaux publics configurables : Instagram, TikTok, Facebook et YouTube
 - Liste clients complete avec adresse, nombre de commandes et total depense
 - Gestion utilisateurs et rôles : Super Admin, Gérant, Caissier
 - Detection des mots de passe demo et generateurs de mots de passe / codes livreurs dans le back-office
@@ -82,7 +84,11 @@ Le back-office contient aussi un formulaire "Test fournisseur" dans l'onglet Not
 
 - Super Admin : acces complet, gestion des utilisateurs.
 - Gerant : commandes, menu, livreurs, paiements, statistiques et exports.
+<<<<<<< HEAD
 - Caissier : commandes du jour, suivi, notifications et tickets. Pas d'acces aux stats, exports, menu, paiements ni utilisateurs.
+=======
+- Caissier : caisse sur place, commandes du jour, suivi, notifications et tickets. Pas d'acces aux stats, exports, menu, paiements ni utilisateurs.
+>>>>>>> 5f92b50 (mise a jour)
 
 ## Sessions admin
 

@@ -25,6 +25,13 @@ try {
         app_json_response(['ok' => true, 'order' => app_create_order(app_request_body())], 201);
     }
 
+<<<<<<< HEAD
+=======
+    if ($resource === 'payments/callback' && $method === 'POST') {
+        app_json_response(['ok' => true, 'order' => app_apply_payment_callback(app_request_body())]);
+    }
+
+>>>>>>> 5f92b50 (mise a jour)
     if ($resource === 'driver/dashboard' && $method === 'POST') {
         app_json_response(['ok' => true, ...app_delivery_dashboard(app_request_body())]);
     }
@@ -36,6 +43,10 @@ try {
 
     if ($resource === 'contact' && $method === 'POST') {
         app_json_response(['ok' => true, 'message' => app_create_contact_message(app_request_body())], 201);
+    }
+
+    if ($resource === 'reviews' && $method === 'POST') {
+        app_json_response(['ok' => true, 'review' => app_create_review(app_request_body())], 201);
     }
 
     if ($resource === 'auth/login' && $method === 'POST') {
@@ -62,6 +73,57 @@ try {
         $user = app_require_user();
         app_require_role($user, ['super_admin', 'manager']);
         app_json_response(['ok' => true, ...app_admin_stats()]);
+    }
+
+    if ($resource === 'admin/operations' && $method === 'GET') {
+        $user = app_require_user();
+        app_require_role($user, ['super_admin', 'manager']);
+        app_json_response(['ok' => true, 'operations' => app_operations_config()]);
+    }
+
+    if ($resource === 'admin/settings' && $method === 'PATCH') {
+        $user = app_require_user();
+        app_require_role($user, ['super_admin', 'manager']);
+        app_json_response(['ok' => true, 'operations' => app_save_settings(app_request_body())]);
+    }
+
+    if ($resource === 'admin/business-hours' && $method === 'PUT') {
+        $user = app_require_user();
+        app_require_role($user, ['super_admin', 'manager']);
+        $body = app_request_body();
+        app_json_response(['ok' => true, 'operations' => app_save_business_hours(is_array($body['hours'] ?? null) ? $body['hours'] : [])]);
+    }
+
+    if ($resource === 'admin/delivery-zones' && in_array($method, ['POST', 'PUT'], true)) {
+        $user = app_require_user();
+        app_require_role($user, ['super_admin', 'manager']);
+        app_json_response(['ok' => true, 'operations' => app_save_delivery_zone(app_request_body())]);
+    }
+
+    if ($resource === 'admin/promo-codes' && in_array($method, ['POST', 'PUT'], true)) {
+        $user = app_require_user();
+        app_require_role($user, ['super_admin', 'manager']);
+        app_json_response(['ok' => true, 'operations' => app_save_promo_code(app_request_body())]);
+    }
+
+    if ($resource === 'admin/kitchen' && $method === 'GET') {
+        app_require_user();
+        app_json_response(['ok' => true, 'orders' => app_kitchen_orders()]);
+    }
+
+    if ($resource === 'admin/pos-order' && $method === 'POST') {
+        $user = app_require_user();
+        app_require_role($user, ['super_admin', 'manager', 'cashier']);
+        $body = app_request_body();
+        $body['source'] = 'pos';
+        $order = app_create_order($body, $user);
+        app_audit_log($user, 'create', 'pos_order', (int) $order['id'], ['number' => $order['number'], 'total' => $order['total']]);
+        app_json_response(['ok' => true, 'order' => $order, 'orders' => app_orders('', 25), 'customers' => app_admin_customers()], 201);
+    }
+
+    if ($resource === 'admin/reviews' && $method === 'GET') {
+        app_require_user();
+        app_json_response(['ok' => true, 'reviews' => app_reviews()]);
     }
 
     if ($resource === 'admin/export' && $method === 'GET') {
@@ -258,7 +320,11 @@ try {
         app_require_role($user, ['super_admin', 'manager']);
         $body = app_request_body();
         $item = app_create_menu_item($body);
+<<<<<<< HEAD
         app_audit_log($user, 'create', 'menu_item', (int) $item['id'], ['name' => $body['name'] ?? null, 'category' => $body['category'] ?? null]);
+=======
+        app_audit_log($user, 'create', 'menu_item', (int) $item['id'], ['name' => $body['name'] ?? null, 'category' => $body['category'] ?? null, 'daily_special' => $body['daily_special'] ?? false]);
+>>>>>>> 5f92b50 (mise a jour)
         app_json_response(['ok' => true, 'item' => $item], 201);
     }
 
@@ -267,7 +333,11 @@ try {
         app_require_role($user, ['super_admin', 'manager']);
         $body = app_request_body();
         $item = app_update_menu_item((int) ($body['id'] ?? 0), $body);
+<<<<<<< HEAD
         app_audit_log($user, 'update', 'menu_item', (int) ($body['id'] ?? 0), ['name' => $body['name'] ?? null, 'category' => $body['category'] ?? null]);
+=======
+        app_audit_log($user, 'update', 'menu_item', (int) ($body['id'] ?? 0), ['name' => $body['name'] ?? null, 'category' => $body['category'] ?? null, 'daily_special' => $body['daily_special'] ?? false]);
+>>>>>>> 5f92b50 (mise a jour)
         app_json_response(['ok' => true, 'item' => $item]);
     }
 
@@ -278,6 +348,15 @@ try {
         app_delete_menu_item($id);
         app_audit_log($user, 'delete', 'menu_item', $id);
         app_json_response(['ok' => true]);
+    }
+
+    if ($resource === 'admin/menu-options' && $method === 'PUT') {
+        $user = app_require_user();
+        app_require_role($user, ['super_admin', 'manager']);
+        $body = app_request_body();
+        $item = app_save_menu_options((int) ($body['menu_item_id'] ?? 0), is_array($body['options'] ?? null) ? $body['options'] : []);
+        app_audit_log($user, 'options', 'menu_item', (int) ($body['menu_item_id'] ?? 0));
+        app_json_response(['ok' => true, 'item' => $item]);
     }
 
     app_json_response(['ok' => false, 'message' => 'Route introuvable.'], 404);

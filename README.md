@@ -97,3 +97,6 @@ Les sessions back-office expirent apres `SESSION_TTL_HOURS` heures, 12 heures pa
 ## Protection connexions
 
 Les connexions admin et livreur sont limitees par `AUTH_MAX_ATTEMPTS` echecs pendant `AUTH_LOCK_MINUTES` minutes. Par defaut, 5 echecs bloquent temporairement la combinaison identifiant + adresse IP.
+
+
+Le site public est accessible via `index.php`. L?administration dispose de sa page d?di?e `admin.php`, avec connexion obligatoire pour acc?der aux donn?es de gestion. L?ancien lien `index.php?page=admin` redirige vers cette page.

@@ -25,13 +25,14 @@ try {
         app_json_response(['ok' => true, 'order' => app_create_order(app_request_body())], 201);
     }
 
-<<<<<<< HEAD
-=======
+    if ($resource === 'orders/cancel' && $method === 'POST') {
+        app_json_response(['ok' => true, 'order' => app_cancel_customer_order(app_request_body())]);
+    }
+
     if ($resource === 'payments/callback' && $method === 'POST') {
         app_json_response(['ok' => true, 'order' => app_apply_payment_callback(app_request_body())]);
     }
 
->>>>>>> 5f92b50 (mise a jour)
     if ($resource === 'driver/dashboard' && $method === 'POST') {
         app_json_response(['ok' => true, ...app_delivery_dashboard(app_request_body())]);
     }
@@ -320,11 +321,7 @@ try {
         app_require_role($user, ['super_admin', 'manager']);
         $body = app_request_body();
         $item = app_create_menu_item($body);
-<<<<<<< HEAD
-        app_audit_log($user, 'create', 'menu_item', (int) $item['id'], ['name' => $body['name'] ?? null, 'category' => $body['category'] ?? null]);
-=======
         app_audit_log($user, 'create', 'menu_item', (int) $item['id'], ['name' => $body['name'] ?? null, 'category' => $body['category'] ?? null, 'daily_special' => $body['daily_special'] ?? false]);
->>>>>>> 5f92b50 (mise a jour)
         app_json_response(['ok' => true, 'item' => $item], 201);
     }
 
@@ -333,11 +330,7 @@ try {
         app_require_role($user, ['super_admin', 'manager']);
         $body = app_request_body();
         $item = app_update_menu_item((int) ($body['id'] ?? 0), $body);
-<<<<<<< HEAD
-        app_audit_log($user, 'update', 'menu_item', (int) ($body['id'] ?? 0), ['name' => $body['name'] ?? null, 'category' => $body['category'] ?? null]);
-=======
         app_audit_log($user, 'update', 'menu_item', (int) ($body['id'] ?? 0), ['name' => $body['name'] ?? null, 'category' => $body['category'] ?? null, 'daily_special' => $body['daily_special'] ?? false]);
->>>>>>> 5f92b50 (mise a jour)
         app_json_response(['ok' => true, 'item' => $item]);
     }
 

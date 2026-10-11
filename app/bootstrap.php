@@ -246,8 +246,6 @@ function app_install_schema(PDO $pdo): void
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
         )",
-<<<<<<< HEAD
-=======
         "CREATE TABLE IF NOT EXISTS app_settings (
             setting_key VARCHAR(80) PRIMARY KEY,
             setting_value TEXT NULL,
@@ -297,7 +295,6 @@ function app_install_schema(PDO $pdo): void
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_review_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
         )",
->>>>>>> 5f92b50 (mise a jour)
     ];
 
     foreach ($statements as $statement) {
@@ -307,11 +304,9 @@ function app_install_schema(PDO $pdo): void
     app_ensure_column($pdo, 'menu_items', 'active', 'ALTER TABLE menu_items ADD active BOOLEAN NOT NULL DEFAULT TRUE AFTER available');
     app_ensure_column($pdo, 'menu_items', 'daily_special', 'ALTER TABLE menu_items ADD daily_special BOOLEAN NOT NULL DEFAULT FALSE AFTER popular');
     app_ensure_column($pdo, 'payments', 'checkout_url', 'ALTER TABLE payments ADD checkout_url VARCHAR(255) NULL AFTER reference');
+    app_ensure_column($pdo, 'orders', 'cancel_token_hash', 'ALTER TABLE orders ADD cancel_token_hash CHAR(64) NULL');
     app_ensure_column($pdo, 'notifications', 'provider_reference', 'ALTER TABLE notifications ADD provider_reference VARCHAR(120) NULL AFTER provider');
     app_ensure_column($pdo, 'delivery_staff', 'access_code_hash', 'ALTER TABLE delivery_staff ADD access_code_hash VARCHAR(255) NULL AFTER phone');
-<<<<<<< HEAD
-    app_backfill_delivery_codes($pdo);
-=======
     app_ensure_column($pdo, 'orders', 'subtotal', 'ALTER TABLE orders ADD subtotal INT UNSIGNED NOT NULL DEFAULT 0 AFTER status');
     app_ensure_column($pdo, 'orders', 'delivery_fee', 'ALTER TABLE orders ADD delivery_fee INT UNSIGNED NOT NULL DEFAULT 0 AFTER subtotal');
     app_ensure_column($pdo, 'orders', 'discount_total', 'ALTER TABLE orders ADD discount_total INT UNSIGNED NOT NULL DEFAULT 0 AFTER delivery_fee');
@@ -324,7 +319,6 @@ function app_install_schema(PDO $pdo): void
     app_ensure_column($pdo, 'menu_items', 'low_stock_threshold', 'ALTER TABLE menu_items ADD low_stock_threshold INT NOT NULL DEFAULT 3 AFTER stock_qty');
     app_backfill_delivery_codes($pdo);
     app_seed_operations($pdo);
->>>>>>> 5f92b50 (mise a jour)
 }
 
 function app_ensure_column(PDO $pdo, string $table, string $column, string $alter): void
@@ -470,6 +464,7 @@ function app_seed_database(PDO $pdo): void
         'total' => 8000,
     ]);
     $orderId = (int) $pdo->lastInsertId();
+
     $pdo->prepare('INSERT INTO order_items (order_id, menu_item_id, name, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?)')
         ->execute([$orderId, 8, 'Tacos Ketchup', 2, 4000, 8000]);
     $pdo->prepare('INSERT INTO payments (order_id, method, amount, status) VALUES (?, ?, ?, ?)')
@@ -492,8 +487,6 @@ function app_seed_delivery_staff(PDO $pdo): void
         ['Abdou Sarr', '+221 76 402 30 30', 'absent'],
     ] as $driver) {
         $stmt->execute([$driver[0], $driver[1], password_hash(app_env('DELIVERY_DEFAULT_CODE', '1234'), PASSWORD_DEFAULT), $driver[2]]);
-<<<<<<< HEAD
-=======
     }
 }
 
@@ -529,7 +522,6 @@ function app_seed_operations(PDO $pdo): void
         'pickup_eta_minutes' => '25',
     ] as $key => $value) {
         $stmt->execute([$key, $value]);
->>>>>>> 5f92b50 (mise a jour)
     }
 }
 
@@ -610,92 +602,6 @@ function app_client_ip(): string
 function app_escape_like(string $value): string
 {
     return str_replace(['%', '_', '\\'], ['\\%', '\\_', '\\\\'], $value);
-}
-
-function app_rate_limit_key(string $scope, string $identifier): string
-{
-    return hash('sha256', $scope . '|' . strtolower(trim($identifier)) . '|' . app_client_ip());
-}
-
-function app_check_rate_limit(string $scope, string $identifier): void
-{
-    $maxAttempts = max(1, (int) app_env('AUTH_MAX_ATTEMPTS', '5'));
-    $windowSeconds = max(60, (int) app_env('AUTH_LOCK_MINUTES', '15') * 60);
-    $key = app_rate_limit_key($scope, $identifier);
-    $limits = app_rate_limits();
-    $entry = $limits[$key] ?? null;
-
-    if (!is_array($entry)) {
-        return;
-    }
-
-    $firstAt = (int) ($entry['first_at'] ?? 0);
-    $attempts = (int) ($entry['attempts'] ?? 0);
-    if ($firstAt <= 0 || time() - $firstAt > $windowSeconds) {
-        unset($limits[$key]);
-        app_save_rate_limits($limits);
-        return;
-    }
-
-    if ($attempts >= $maxAttempts) {
-        $retryAfter = max(1, $windowSeconds - (time() - $firstAt));
-        header('Retry-After: ' . $retryAfter);
-        app_json_response(['ok' => false, 'message' => 'Trop de tentatives. Reessayez plus tard.'], 429);
-    }
-}
-
-function app_record_rate_limit(string $scope, string $identifier, bool $success): void
-{
-    $windowSeconds = max(60, (int) app_env('AUTH_LOCK_MINUTES', '15') * 60);
-    $key = app_rate_limit_key($scope, $identifier);
-    $limits = app_rate_limits();
-
-    if ($success) {
-        unset($limits[$key]);
-        app_save_rate_limits($limits);
-        return;
-    }
-
-    $entry = $limits[$key] ?? ['attempts' => 0, 'first_at' => time()];
-    if (!is_array($entry) || time() - (int) ($entry['first_at'] ?? 0) > $windowSeconds) {
-        $entry = ['attempts' => 0, 'first_at' => time()];
-    }
-    $entry['attempts'] = (int) ($entry['attempts'] ?? 0) + 1;
-    $entry['last_at'] = time();
-    $limits[$key] = $entry;
-
-    app_save_rate_limits($limits);
-}
-
-function app_rate_limits(): array
-{
-    if (!file_exists(RATE_LIMIT_FILE)) {
-        return [];
-    }
-
-    $decoded = json_decode((string) file_get_contents(RATE_LIMIT_FILE), true);
-    return is_array($decoded) ? $decoded : [];
-}
-
-function app_save_rate_limits(array $limits): void
-{
-    if (!is_dir(dirname(RATE_LIMIT_FILE))) {
-        mkdir(dirname(RATE_LIMIT_FILE), 0775, true);
-    }
-
-    file_put_contents(RATE_LIMIT_FILE, json_encode($limits, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-}
-
-function app_client_ip(): string
-{
-    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'] as $key) {
-        $value = trim((string) ($_SERVER[$key] ?? ''));
-        if ($value !== '') {
-            return trim(explode(',', $value)[0]);
-        }
-    }
-
-    return 'local';
 }
 
 function app_rate_limit_key(string $scope, string $identifier): string
@@ -1007,7 +913,8 @@ function app_orders(string $query = '', int $limit = 20): array
     $items = app_order_items(array_map(fn ($order) => (int) $order['id'], $orders));
 
     foreach ($orders as &$order) {
-        $order['id'] = (int) $order['id'];
+        unset($order['cancel_token_hash']);
+    $order['id'] = (int) $order['id'];
         $order['subtotal'] = (int) ($order['subtotal'] ?? 0);
         $order['delivery_fee'] = (int) ($order['delivery_fee'] ?? 0);
         $order['discount_total'] = (int) ($order['discount_total'] ?? 0);
@@ -1037,10 +944,10 @@ function app_normalized_phone(string $phone): string
 function app_delivery_dashboard(array $body): array
 {
     $phone = trim((string) ($body['phone'] ?? ''));
-    $code = trim((string) ($body['code'] ?? ''));
+    $password = (string) ($body['password'] ?? $body['code'] ?? '');
     $normalized = app_normalized_phone($phone);
-    if ($normalized === '' || $code === '') {
-        app_json_response(['ok' => false, 'message' => 'Telephone et code livreur requis.'], 422);
+    if ($normalized === '' || $password === '') {
+        app_json_response(['ok' => false, 'message' => 'Telephone et mot de passe requis.'], 422);
     }
     app_check_rate_limit('driver', $normalized);
 
@@ -1054,13 +961,13 @@ function app_delivery_dashboard(array $body): array
         }
     }
 
-    if ($driverRow === null || !password_verify($code, (string) ($driverRow['access_code_hash'] ?? ''))) {
+    if ($driverRow === null || !password_verify($password, (string) ($driverRow['access_code_hash'] ?? ''))) {
         app_record_rate_limit('driver', $normalized, false);
         app_json_response(['ok' => false, 'message' => 'Acces livreur invalide.'], 403);
     }
-    if (app_is_production() && hash_equals(app_env('DELIVERY_DEFAULT_CODE', '1234'), $code)) {
+    if (app_is_production() && hash_equals(app_env('DELIVERY_DEFAULT_CODE', '1234'), $password)) {
         app_record_rate_limit('driver', $normalized, false);
-        app_json_response(['ok' => false, 'message' => 'Code livreur de demonstration refuse en production.'], 403);
+        app_json_response(['ok' => false, 'message' => 'Mot de passe de demonstration refuse en production.'], 403);
     }
     app_record_rate_limit('driver', $normalized, true);
 
@@ -1080,7 +987,8 @@ function app_delivery_dashboard(array $body): array
     $items = app_order_items(array_map(fn ($order) => (int) $order['id'], $orders));
 
     foreach ($orders as &$order) {
-        $order['id'] = (int) $order['id'];
+        unset($order['cancel_token_hash']);
+    $order['id'] = (int) $order['id'];
         $order['total'] = (int) $order['total'];
         $order['delivery_staff_id'] = (int) $order['delivery_staff_id'];
         $order['items'] = $items[$order['id']] ?? [];
@@ -1100,7 +1008,7 @@ function app_delivery_dashboard(array $body): array
 function app_update_delivery_order_status(array $body): array
 {
     $phone = trim((string) ($body['phone'] ?? ''));
-    $code = trim((string) ($body['code'] ?? ''));
+    $password = (string) ($body['password'] ?? $body['code'] ?? '');
     $orderId = (int) ($body['order_id'] ?? 0);
     $status = (string) ($body['status'] ?? '');
 
@@ -1108,7 +1016,7 @@ function app_update_delivery_order_status(array $body): array
         app_json_response(['ok' => false, 'message' => 'Mise a jour livreur invalide.'], 422);
     }
 
-    $dashboard = app_delivery_dashboard(['phone' => $phone, 'code' => $code]);
+    $dashboard = app_delivery_dashboard(['phone' => $phone, 'password' => $password]);
     $allowedOrderIds = array_map(fn ($order) => (int) $order['id'], $dashboard['orders']);
     if (!in_array($orderId, $allowedOrderIds, true)) {
         app_json_response(['ok' => false, 'message' => 'Commande non assignee a ce livreur.'], 403);
@@ -1134,7 +1042,7 @@ function app_update_delivery_order_status(array $body): array
 
     app_queue_notification($orderId, $status, 'whatsapp');
 
-    return app_delivery_dashboard(['phone' => $phone, 'code' => $code]);
+    return app_delivery_dashboard(['phone' => $phone, 'password' => $password]);
 }
 
 function app_new_order_number(): string
@@ -1240,14 +1148,11 @@ function app_create_order(array $body, ?array $user = null): array
     if (!in_array($fulfillment, ['delivery', 'pickup'], true)) {
         app_json_response(['ok' => false, 'message' => 'Mode de retrait invalide.'], 422);
     }
-<<<<<<< HEAD
-=======
     $scheduledAt = app_validate_scheduled_at(isset($body['scheduled_at']) ? (string) $body['scheduled_at'] : null);
     $openState = app_is_open_now();
     if ($scheduledAt === null && !$openState['open']) {
         app_json_response(['ok' => false, 'message' => $openState['message']], 422);
     }
->>>>>>> 5f92b50 (mise a jour)
     if ($fulfillment === 'delivery' && trim((string) ($customer['address'] ?? '')) === '') {
         app_json_response(['ok' => false, 'message' => 'Adresse obligatoire pour une livraison.'], 422);
     }
@@ -1339,9 +1244,6 @@ function app_create_order(array $body, ?array $user = null): array
         $address,
         trim((string) ($customer['note'] ?? '')),
         $fulfillment,
-<<<<<<< HEAD
-        'pending',
-=======
         $deliveryZoneId,
         $scheduledAt,
         $status,
@@ -1349,11 +1251,13 @@ function app_create_order(array $body, ?array $user = null): array
         $deliveryFee,
         $discountTotal,
         $promo['code'] ?? null,
->>>>>>> 5f92b50 (mise a jour)
         $total,
         $createdBy,
     ]);
     $orderId = (int) $pdo->lastInsertId();
+
+    $cancelToken = bin2hex(random_bytes(32));
+    $pdo->prepare('UPDATE orders SET cancel_token_hash = ? WHERE id = ?')->execute([hash('sha256', $cancelToken), $orderId]);
 
     $itemStmt = $pdo->prepare('INSERT INTO order_items (order_id, menu_item_id, name, options_text, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)');
     foreach ($orderItems as $item) {
@@ -1388,11 +1292,45 @@ function app_create_order(array $body, ?array $user = null): array
     $pdo->commit();
 
     $order = app_orders($number, 1)[0];
+    $order['cancel_token'] = $cancelToken;
     if (!$isPosOrder) {
         app_queue_notification($orderId, 'confirmation', 'whatsapp');
     }
 
     return $order;
+}
+
+function app_cancel_customer_order(array $body): array
+{
+    $id = (int) ($body['id'] ?? 0);
+    $token = (string) ($body['token'] ?? '');
+    $reason = trim((string) ($body['reason'] ?? ''));
+    if ($id <= 0 || strlen($token) !== 64 || $reason === '' || strlen($reason) > 255) {
+        app_json_response(['ok' => false, 'message' => 'Commande ou motif invalide (255 caractères maximum).'], 422);
+    }
+    $pdo = app_pdo();
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare('SELECT status, cancel_token_hash FROM orders WHERE id = ? FOR UPDATE');
+        $stmt->execute([$id]);
+        $order = $stmt->fetch();
+        if (!$order || !hash_equals((string) $order['cancel_token_hash'], hash('sha256', $token))) {
+            $pdo->rollBack();
+            app_json_response(['ok' => false, 'message' => 'Vous ne pouvez pas annuler cette commande.'], 403);
+        }
+        if ($order['status'] !== 'pending') {
+            $pdo->rollBack();
+            app_json_response(['ok' => false, 'message' => 'Cette commande est déjà prise en charge. Contactez le restaurant pour une annulation.'], 409);
+        }
+        $pdo->prepare("UPDATE orders SET status = 'cancelled', cancellation_reason = ? WHERE id = ?")->execute([$reason, $id]);
+        $pdo->prepare("INSERT INTO order_status_history (order_id, status, note) VALUES (?, 'cancelled', ?)")->execute([$id, 'Annulation client : ' . $reason]);
+        $pdo->prepare('UPDATE menu_items m JOIN (SELECT menu_item_id, SUM(quantity) qty FROM order_items WHERE order_id = ? GROUP BY menu_item_id) i ON i.menu_item_id = m.id SET m.stock_qty = m.stock_qty + i.qty WHERE m.stock_enabled = 1')->execute([$id]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+    return app_order_by_id($id);
 }
 
 function app_create_contact_message(array $body): array
@@ -1498,9 +1436,6 @@ function app_admin_summary(?array $user = null): array
         'payments_paid_today' => (int) $pdo->query("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'paid' AND DATE(paid_at) = '{$today}'")->fetchColumn(),
     ];
 
-<<<<<<< HEAD
-    $response = ['summary' => $summary, 'orders' => app_orders('', 25), 'delivery_staff' => app_delivery_staff()];
-=======
     $response = [
         'summary' => $summary,
         'orders' => app_orders('', 25),
@@ -1508,7 +1443,6 @@ function app_admin_summary(?array $user = null): array
         'operations' => app_operations_config(),
         'kitchen_orders' => app_kitchen_orders(),
     ];
->>>>>>> 5f92b50 (mise a jour)
     if ($user !== null && !empty(app_role_permissions((string) ($user['role'] ?? ''))['can_view_stats'])) {
         $response['checks'] = app_system_checks();
     }
@@ -1516,8 +1450,6 @@ function app_admin_summary(?array $user = null): array
     return $response;
 }
 
-<<<<<<< HEAD
-=======
 function app_operations_config(): array
 {
     return [
@@ -1653,7 +1585,6 @@ function app_reviews(): array
     }, $rows);
 }
 
->>>>>>> 5f92b50 (mise a jour)
 function app_system_checks(): array
 {
     $checks = [];
@@ -1679,8 +1610,6 @@ function app_system_checks(): array
         'message' => $providerReady ? "Fournisseur {$provider} configure." : 'Notifications automatiques non configurees ou incompletes.',
     ];
     $checks[] = [
-<<<<<<< HEAD
-=======
         'key' => 'payment_callback_secret',
         'label' => 'Secret callback paiement',
         'status' => app_env('PAYMENT_CALLBACK_SECRET', '') !== '' ? 'ok' : 'warning',
@@ -1689,7 +1618,6 @@ function app_system_checks(): array
             : 'PAYMENT_CALLBACK_SECRET est vide: a renseigner avant production.',
     ];
     $checks[] = [
->>>>>>> 5f92b50 (mise a jour)
         'key' => 'delivery_code',
         'label' => 'Code livreur par defaut',
         'status' => app_env('DELIVERY_DEFAULT_CODE', '1234') !== '1234' ? 'ok' : 'warning',
@@ -1931,15 +1859,6 @@ function app_delivery_staff(): array
 
 function app_delivery_staff_one(int $id): array
 {
-<<<<<<< HEAD
-    foreach (app_delivery_staff() as $driver) {
-        if ((int) $driver['id'] === $id) {
-            return $driver;
-        }
-    }
-
-    app_json_response(['ok' => false, 'message' => 'Livreur introuvable.'], 404);
-=======
     $stmt = app_pdo()->prepare('SELECT id, name, phone, status, active FROM delivery_staff WHERE id = ?');
     $stmt->execute([$id]);
     $driver = $stmt->fetch();
@@ -1949,7 +1868,6 @@ function app_delivery_staff_one(int $id): array
     $driver['id'] = (int) $driver['id'];
     $driver['active'] = (bool) $driver['active'];
     return $driver;
->>>>>>> 5f92b50 (mise a jour)
 }
 
 function app_save_delivery_staff(array $body): array
@@ -1957,7 +1875,7 @@ function app_save_delivery_staff(array $body): array
     $id = (int) ($body['id'] ?? 0);
     $name = trim((string) ($body['name'] ?? ''));
     $phone = trim((string) ($body['phone'] ?? ''));
-    $accessCode = trim((string) ($body['access_code'] ?? ''));
+    $accessCode = (string) ($body['password'] ?? '');
     $status = (string) ($body['status'] ?? 'available');
     $active = !empty($body['active']) ? 1 : 0;
 
@@ -1967,8 +1885,8 @@ function app_save_delivery_staff(array $body): array
 
     if ($id > 0) {
         if ($accessCode !== '') {
-            if (strlen($accessCode) < 4) {
-                app_json_response(['ok' => false, 'message' => 'Le code livreur doit contenir au moins 4 caracteres.'], 422);
+            if (strlen($accessCode) < 8) {
+                app_json_response(['ok' => false, 'message' => 'Le mot de passe livreur doit contenir au moins 8 caracteres.'], 422);
             }
             $stmt = app_pdo()->prepare('UPDATE delivery_staff SET name = ?, phone = ?, access_code_hash = ?, status = ?, active = ? WHERE id = ?');
             $stmt->execute([$name, $phone, password_hash($accessCode, PASSWORD_DEFAULT), $status, $active, $id]);
@@ -1984,11 +1902,8 @@ function app_save_delivery_staff(array $body): array
             }
         }
     } else {
-        if ($accessCode === '') {
-            $accessCode = app_env('DELIVERY_DEFAULT_CODE', '1234');
-        }
-        if (strlen($accessCode) < 4) {
-            app_json_response(['ok' => false, 'message' => 'Le code livreur doit contenir au moins 4 caracteres.'], 422);
+        if (strlen($accessCode) < 8) {
+            app_json_response(['ok' => false, 'message' => 'Le mot de passe livreur doit contenir au moins 8 caracteres.'], 422);
         }
         $stmt = app_pdo()->prepare('INSERT INTO delivery_staff (name, phone, access_code_hash, status, active) VALUES (?, ?, ?, ?, ?)');
         $stmt->execute([$name, $phone, password_hash($accessCode, PASSWORD_DEFAULT), $status, $active]);
@@ -2424,6 +2339,7 @@ function app_order_by_id(int $id): array
     if (!$order) {
         app_json_response(['ok' => false, 'message' => 'Commande introuvable.'], 404);
     }
+    unset($order['cancel_token_hash']);
     $order['id'] = (int) $order['id'];
     $order['subtotal'] = (int) ($order['subtotal'] ?? 0);
     $order['delivery_fee'] = (int) ($order['delivery_fee'] ?? 0);

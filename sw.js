@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chez-ketchup-v16';
+const CACHE_NAME = 'chez-ketchup-v22';
 const ASSETS = [
   './',
   'index.php',
@@ -31,7 +31,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
 
   // Never cache API responses
-  if (url.pathname.includes('/api/') || url.searchParams.has('resource')) {
+  if (url.pathname.endsWith('/admin.php') || url.searchParams.get('page') === 'admin' || url.pathname.includes('/api/') || url.searchParams.has('resource')) {
     return;
   }
 

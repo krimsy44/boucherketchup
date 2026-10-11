@@ -1,4 +1,5 @@
 const API = 'api/index.php';
+const isAdminPage = document.body.dataset.app === 'admin';
 
 const state = {
   categories: [],
@@ -11,19 +12,16 @@ const state = {
   posSearch: '',
   deliveryStaff: [],
   driverPhone: localStorage.getItem('ck_driver_phone') || '',
-  driverCode: '',
+  driverPassword: '',
   adminOrders: [],
   notifications: [],
   contactMessages: [],
   customers: [],
   users: [],
   auditLogs: [],
-<<<<<<< HEAD
-=======
   operations: null,
   kitchenOrders: [],
   reviews: [],
->>>>>>> 5f92b50 (mise a jour)
   stats: null,
   checks: [],
   token: localStorage.getItem('ck_token') || '',
@@ -35,6 +33,49 @@ const qs = (selector, root = document) => root.querySelector(selector);
 const qsa = (selector, root = document) => [...root.querySelectorAll(selector)];
 let toastTimer = null;
 let menuPreviewObjectUrl = '';
+let adminOrdersTimer = null;
+let adminOrdersRefreshing = false;
+let latestAdminOrderId = null;
+
+function startAdminOrderUpdates() {
+  if (!isAdminPage || adminOrdersTimer) return;
+  adminOrdersTimer = setInterval(refreshAdminOrders, 5000);
+}
+
+async function refreshAdminOrders() {
+  if (!state.token || document.hidden || adminOrdersRefreshing || qs('#admin-content')?.classList.contains('hidden')) return;
+  // Preserve the selection while the admin is changing an order.
+  if (document.activeElement?.closest('#dashboard-orders, #admin-orders-table')) return;
+  adminOrdersRefreshing = true;
+  const token = state.token;
+  try {
+    const payload = await api('admin/summary', { cache: 'no-store' });
+    if (state.token !== token) return;
+    const latestId = Math.max(0, ...payload.orders.map((order) => Number(order.id)));
+    if (latestAdminOrderId !== null && latestId > latestAdminOrderId) {
+      const newOrders = payload.orders.filter((order) => Number(order.id) > latestAdminOrderId);
+      toast(`${newOrders.length} nouvelle(s) commande(s) reçue(s).`, 'success');
+      const alert = qs('#admin-order-alert');
+      if (alert) {
+        alert.hidden = false;
+        alert.textContent = `Nouvelle commande reçue : ${newOrders[0].number}. Consultez l’onglet Commandes.`;
+      }
+    }
+    latestAdminOrderId = latestId;
+    state.deliveryStaff = payload.delivery_staff || [];
+    renderAdminTables(payload.orders);
+    renderKitchenOrders(payload.kitchen_orders || []);
+    renderAdminOrderSummary(payload.summary);
+  } catch (error) {
+    const alert = qs('#admin-order-alert');
+    if (alert) {
+      alert.hidden = false;
+      alert.textContent = 'Actualisation des commandes interrompue. Vérifiez la connexion ou reconnectez-vous.';
+    }
+  } finally {
+    adminOrdersRefreshing = false;
+  }
+}
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -84,7 +125,7 @@ function syncMenuImagePreview() {
 
 async function api(resource, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  if (isAdminPage && state.token) headers.Authorization = `Bearer ${state.token}`;
 
   const response = await fetch(`${API}?resource=${resource}`, { ...options, headers });
   const payload = await response.json();
@@ -153,13 +194,15 @@ function renderSocialLinks(settings = state.operations?.settings || {}) {
 }
 
 function showPage(page) {
+  if (!qs(`#page-${page}`)) return;
+  closeMobileMenu();
   qsa('.page').forEach((el) => el.classList.remove('active'));
   qsa('[data-page]').forEach((el) => el.classList.toggle('active', el.dataset.page === page));
   qs(`#page-${page}`).classList.add('active');
 
   if (page === 'menu') renderMenu();
   if (page === 'admin' && state.token) loadAdmin();
-  if (page === 'driver' && state.driverPhone && state.driverCode) loadDriverDashboard().catch((error) => toast(error.message));
+  if (page === 'driver' && state.driverPhone && state.driverPassword) loadDriverDashboard().catch((error) => toast(error.message));
   window.scrollTo({ top: 0, behavior: 'smooth' });
 
   const url = new URL(window.location);
@@ -168,6 +211,10 @@ function showPage(page) {
 }
 
 function showLogin() {
+  clearInterval(adminOrdersTimer);
+  adminOrdersTimer = null;
+  latestAdminOrderId = null;
+  if (qs('#admin-order-alert')) qs('#admin-order-alert').hidden = true;
   state.token = '';
   state.user = null;
   localStorage.removeItem('ck_token');
@@ -226,13 +273,6 @@ function sortedItems(items) {
 }
 
 function foodCard(item) {
-<<<<<<< HEAD
-  const media = item.image_url
-    ? `<img class="food-img" src="${item.image_url}" alt="${item.name}" loading="lazy">`
-    : `<div class="food-emoji">${item.emoji}</div>`;
-  const action = item.available
-    ? `<button class="add" data-add="${item.id}" aria-label="Ajouter ${item.name} au panier">+</button>`
-=======
   const options = (item.options || []).length
     ? `<div class="option-list">${item.options.map((option) => `
         <label><input type="checkbox" data-option="${item.id}" value="${option.id}"> ${escapeHtml(option.name)}${Number(option.price_delta) ? ` +${money(option.price_delta)}` : ''}</label>
@@ -243,7 +283,6 @@ function foodCard(item) {
     : `<div class="food-emoji">${escapeHtml(item.emoji)}</div>`;
   const action = item.available
     ? `<button class="add" data-add="${item.id}" aria-label="Ajouter ${escapeHtml(item.name)} au panier">+</button>`
->>>>>>> 5f92b50 (mise a jour)
     : '<span class="unavailable-badge">Indisponible</span>';
 
   return `
@@ -264,6 +303,7 @@ function foodCard(item) {
 }
 
 function renderFeatured() {
+  if (!qs('#featured-grid')) return;
   const featured = sortedItems(state.menu.filter((item) => item.popular)).slice(0, 8);
   qs('#featured-grid').innerHTML = featured.map(foodCard).join('');
   const boardItems = sortedItems(state.menu.filter((item) => item.daily_special || item.popular)).slice(0, 4);
@@ -298,6 +338,7 @@ function renderCategories() {
 }
 
 function renderMenu() {
+  if (!qs('#menu-grid')) return;
   renderCategories();
   const items = state.currentCategory === 'all'
     ? state.menu
@@ -391,6 +432,7 @@ function cartSummary() {
 }
 
 function renderCart() {
+  if (!qs('#cart')) return;
   const summary = cartSummary();
   qs('#cart-count').textContent = state.cart.reduce((sum, item) => sum + item.qty, 0);
   qs('#cart-total').textContent = money(summary.total);
@@ -406,9 +448,10 @@ function renderCart() {
           <div class="muted">${money(item.price * item.qty)}</div>
         </div>
         <div class="qty">
-          <button data-qty="${item.key}" data-delta="-1">-</button>
+          <button type="button" data-qty="${item.key}" data-delta="-1" aria-label="Diminuer la quantité">−</button>
           <span>${item.qty}</span>
-          <button data-qty="${item.key}" data-delta="1">+</button>
+          <button type="button" data-qty="${item.key}" data-delta="1" aria-label="Augmenter la quantité">+</button>
+          <button type="button" data-qty="${item.key}" data-delta="${-item.qty}">Retirer</button>
         </div>
       </div>
     `).join('')
@@ -454,7 +497,20 @@ function paymentHint(order) {
   if (order.payment_status === 'paid') {
     return `Paiement confirmé. Référence ${order.payment_reference || '-'}.`;
   }
+  if (paymentCheckoutUrl(order)) {
+    return `Réglez votre commande avec ${paymentMethodLabel(order.payment_method)} en cliquant sur « Payer maintenant ».`;
+  }
   return `${paymentMethodLabel(order.payment_method)} sélectionné. Paiement à confirmer par le restaurant. Référence ${order.payment_reference || '-'}.`;
+}
+
+function paymentCheckoutUrl(order) {
+  if (order.payment_method === 'cash' || order.payment_status !== 'pending' || order.status === 'cancelled') return '';
+  try {
+    const url = new URL(order.payment_checkout_url);
+    return url.protocol === 'https:' ? url.href : '';
+  } catch {
+    return '';
+  }
 }
 
 function orderItemsText(order) {
@@ -548,6 +604,27 @@ function clearPosTicket() {
   renderPosTicket();
 }
 
+function customerCancelToken(id) {
+  try { return localStorage.getItem(`ck_cancel_${id}`) || ''; } catch { return ''; }
+}
+
+async function cancelCustomerOrder(button) {
+  const id = button.dataset.cancelOrder;
+  const reason = prompt('Pourquoi souhaitez-vous annuler cette commande ?');
+  if (!reason?.trim()) return;
+  button.disabled = true;
+  try {
+    const payload = await api('orders/cancel', {
+      method: 'POST', body: JSON.stringify({ id: Number(id), token: customerCancelToken(id), reason: reason.trim() }),
+    });
+    button.closest('article').outerHTML = orderCard(payload.order);
+    toast('Votre commande a été annulée.', 'success');
+  } catch (error) {
+    toast(error.message, 'error');
+    button.disabled = false;
+  }
+}
+
 function orderCard(order) {
   const steps = ['pending', 'prep', 'delivery', 'done'];
   const activeIndex = Math.max(0, steps.indexOf(order.status));
@@ -566,6 +643,9 @@ function orderCard(order) {
       ${order.scheduled_at ? `<p class="muted">Programme: ${new Date(order.scheduled_at).toLocaleString('fr-FR')}</p>` : ''}
       <p><span class="badge pay-${order.payment_status}">${paymentStatusLabel(order.payment_status)}</span></p>
       <p class="muted">${escapeHtml(paymentHint(order))}</p>
+      ${order.status === 'pending' && customerCancelToken(order.id) ? `<button type="button" class="secondary danger" data-cancel-order="${order.id}">Annuler ma commande</button>` : ''}
+      ${order.status === 'cancelled' ? `<p class="muted">Motif : ${escapeHtml(order.cancellation_reason || '')}</p>${order.payment_status === 'paid' ? '<p>Contactez le restaurant pour le remboursement.</p>' : ''}` : ''}
+      ${paymentCheckoutUrl(order) ? `<a class="primary link-button" href="${escapeHtml(paymentCheckoutUrl(order))}" rel="noopener noreferrer">Payer maintenant — ${escapeHtml(paymentMethodLabel(order.payment_method))}</a>` : ''}
       <div class="timeline">
         ${steps.map((step, index) => `<span class="step ${index < activeIndex ? 'done' : index === activeIndex ? 'active' : ''}" title="${statusLabel(step)}"></span>`).join('')}
       </div>
@@ -615,14 +695,14 @@ function renderDriverDashboard(payload) {
   `;
 }
 
-async function loadDriverDashboard(phone = state.driverPhone, code = state.driverCode) {
+async function loadDriverDashboard(phone = state.driverPhone, password = state.driverPassword) {
   if (!phone) return;
   const payload = await api('driver/dashboard', {
     method: 'POST',
-    body: JSON.stringify({ phone, code }),
+    body: JSON.stringify({ phone, password }),
   });
   state.driverPhone = phone;
-  state.driverCode = code;
+  state.driverPassword = password;
   localStorage.setItem('ck_driver_phone', phone);
   renderDriverDashboard(payload);
 }
@@ -631,9 +711,9 @@ async function submitDriverLogin(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
   const phone = form.get('phone');
-  const code = form.get('code');
+  const password = form.get('password');
   try {
-    await loadDriverDashboard(phone, code);
+    await loadDriverDashboard(phone, password);
     toast('Courses chargees.');
   } catch (error) {
     toast(error.message);
@@ -644,7 +724,7 @@ async function updateDriverOrderStatus(orderId, status) {
   try {
     const payload = await api('driver/order-status', {
       method: 'PATCH',
-      body: JSON.stringify({ phone: state.driverPhone, code: state.driverCode, order_id: Number(orderId), status }),
+      body: JSON.stringify({ phone: state.driverPhone, password: state.driverPassword, order_id: Number(orderId), status }),
     });
     renderDriverDashboard(payload);
     toast(status === 'done' ? 'Commande livree.' : 'Commande en livraison.');
@@ -655,19 +735,13 @@ async function updateDriverOrderStatus(orderId, status) {
 
 function logoutDriver() {
   state.driverPhone = '';
-  state.driverCode = '';
+  state.driverPassword = '';
   localStorage.removeItem('ck_driver_phone');
-<<<<<<< HEAD
-  qs('#driver-login-form').reset();
-=======
   resetForm('#driver-login-form');
->>>>>>> 5f92b50 (mise a jour)
   qs('#driver-dashboard').innerHTML = '';
   toast('Espace livreur ferme.');
 }
 
-<<<<<<< HEAD
-=======
 function renderCheckoutZones() {
   const select = qs('#delivery-zone');
   if (!select) return;
@@ -694,7 +768,6 @@ function syncFulfillmentFields() {
   renderCart();
 }
 
->>>>>>> 5f92b50 (mise a jour)
 async function submitOrder(event) {
   event.preventDefault();
   checkoutNotice('');
@@ -709,11 +782,6 @@ async function submitOrder(event) {
   const fulfillment = form.get('fulfillment');
   const address = String(form.get('address') || '').trim();
   if (fulfillment === 'delivery' && address === '') {
-<<<<<<< HEAD
-    toast('Adresse obligatoire pour une livraison.');
-    return;
-  }
-=======
     checkoutNotice('Adresse obligatoire pour une livraison.', 'error');
     toast('Adresse obligatoire pour une livraison.', 'error');
     return;
@@ -735,7 +803,6 @@ async function submitOrder(event) {
       return;
     }
   }
->>>>>>> 5f92b50 (mise a jour)
 
   const body = {
     customer: {
@@ -745,12 +812,9 @@ async function submitOrder(event) {
       note: form.get('note'),
     },
     fulfillment,
-<<<<<<< HEAD
-=======
     delivery_zone_id: fulfillment === 'delivery' ? Number(form.get('delivery_zone_id')) : null,
     promo_code: form.get('promo_code') || '',
     scheduled_at: scheduledAt,
->>>>>>> 5f92b50 (mise a jour)
     payment_method: form.get('payment_method'),
     items: state.cart.map((item) => ({ id: item.id, qty: item.qty, options: item.options || [] })),
   };
@@ -760,12 +824,13 @@ async function submitOrder(event) {
       submitButton.disabled = true;
       submitButton.textContent = 'Validation...';
     }
-<<<<<<< HEAD
-=======
     checkoutNotice('Envoi de la commande...', 'info');
     toast('Envoi de la commande...', 'info');
->>>>>>> 5f92b50 (mise a jour)
     const payload = await api('orders', { method: 'POST', body: JSON.stringify(body) });
+    if (payload.order.cancel_token) {
+      try { localStorage.setItem(`ck_cancel_${payload.order.id}`, payload.order.cancel_token); }
+      catch { toast('Le navigateur ne permet pas de conserver l’accès à l’annulation.', 'error'); }
+    }
     state.cart = [];
     renderCart();
     resetForm(event.currentTarget);
@@ -776,20 +841,14 @@ async function submitOrder(event) {
     qs('#tracking-results').innerHTML = orderCard(payload.order);
     toast(`Commande ${payload.order.number} enregistrée.`, 'success');
   } catch (error) {
-<<<<<<< HEAD
-    toast(error.message);
-=======
     const message = error.message || 'Commande impossible. Vérifiez les informations.';
     checkoutNotice(message, 'error');
     toast(message, 'error');
->>>>>>> 5f92b50 (mise a jour)
   } finally {
     if (submitButton) {
       submitButton.disabled = false;
       submitButton.textContent = 'Commander maintenant';
     }
-<<<<<<< HEAD
-=======
   }
 }
 
@@ -852,7 +911,6 @@ async function submitPosOrder(event) {
       submitButton.disabled = false;
       submitButton.textContent = 'Encaisser';
     }
->>>>>>> 5f92b50 (mise a jour)
   }
 }
 
@@ -1047,7 +1105,7 @@ async function uploadMenuImage(file) {
   formData.append('image', file);
 
   const headers = {};
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  if (isAdminPage && state.token) headers.Authorization = `Bearer ${state.token}`;
 
   const response = await fetch(`${API}?resource=admin/menu-upload`, {
     method: 'POST',
@@ -1183,8 +1241,6 @@ function renderDeliveryStaff() {
   `).join('');
 }
 
-<<<<<<< HEAD
-=======
 const dayLabels = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 
 function renderKitchenOrders(orders = state.kitchenOrders) {
@@ -1266,7 +1322,6 @@ function renderReviews(reviews = state.reviews) {
   );
 }
 
->>>>>>> 5f92b50 (mise a jour)
 function generatedSecret(length = 12) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
   const bytes = new Uint32Array(length);
@@ -1279,7 +1334,9 @@ function resetDeliveryForm() {
   const form = resetForm('#delivery-form');
   if (!form) return;
   form.elements.id.value = '';
-  form.elements.access_code.value = '';
+  form.elements.password.value = '';
+  form.elements.password.required = true;
+  form.elements.password.placeholder = 'Mot de passe du livreur';
   form.elements.active.checked = true;
   qs('#delivery-form-title').textContent = 'Ajouter un livreur';
 }
@@ -1291,7 +1348,9 @@ function editDeliveryStaff(id) {
   form.elements.id.value = driver.id;
   form.elements.name.value = driver.name;
   form.elements.phone.value = driver.phone;
-  form.elements.access_code.value = '';
+  form.elements.password.value = '';
+  form.elements.password.required = false;
+  form.elements.password.placeholder = 'Laisser vide pour conserver';
   form.elements.status.value = driver.status;
   form.elements.active.checked = Boolean(driver.active);
   qs('#delivery-form-title').textContent = `Modifier ${driver.name}`;
@@ -1340,19 +1399,89 @@ function renderContactMessages(messages = state.contactMessages) {
   );
 }
 
+const auditActions = {
+  create: 'Cr?ation', update: 'Modification', delete: 'Suppression',
+  status: 'Changement de statut', assign_delivery: 'Affectation d?un livreur',
+  availability: 'Disponibilit?', options: 'Options du plat', test: 'Test d?envoi',
+};
+const auditEntities = {
+  order: 'Commande', pos_order: 'Commande caisse', user: 'Utilisateur',
+  delivery_staff: 'Livreur', payment: 'Paiement', menu_item: 'Plat', notification: 'Notification',
+};
+const auditFields = {
+  name: 'Nom', phone: 'T?l?phone', email: 'Email', role: 'R?le', status: 'Statut',
+  reason: 'Motif', active: 'Compte actif', available: 'Disponible', category: 'Cat?gorie',
+  daily_special: 'Plat du jour', number: 'Num?ro de commande', total: 'Montant',
+  delivery_staff_id: 'Livreur affect?', channel: 'Canal', recipient: 'Destinataire',
+};
+
+function auditDetailValue(key, value, entity) {
+  if (value === null || value === undefined || value === '') return 'Non renseign?';
+  if (['active', 'available', 'daily_special'].includes(key)) {
+    return [true, 1, '1', 'true'].includes(value) ? 'Oui' : 'Non';
+  }
+  if (key === 'total') return money(value);
+  if (key === 'role') return roleLabel(value);
+  if (key === 'category') return categoryLabel(value);
+  if (key === 'delivery_staff_id') {
+    const driver = state.deliveryStaff.find((item) => Number(item.id) === Number(value));
+    return driver ? `${driver.name} (#${value})` : `Livreur #${value}`;
+  }
+  if (key === 'channel') return { whatsapp: 'WhatsApp', sms: 'SMS', email: 'Email' }[value] || value;
+  if (key === 'status') {
+    const labels = entity === 'delivery_staff'
+      ? { available: 'Disponible', busy: 'En course', absent: 'Absent' }
+      : entity === 'notification'
+        ? { queued: 'En attente', sent: 'Envoy?e', failed: '?chec' }
+        : entity === 'payment'
+          ? { pending: 'En attente', paid: 'Pay?', failed: '?chec', refunded: 'Rembours?' }
+          : { pending: 'En attente', prep: 'En pr?paration', delivery: 'En livraison', done: 'Termin?e', cancelled: 'Annul?e' };
+    return labels[value] || value;
+  }
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
 function renderAuditLogs(logs = state.auditLogs) {
   state.auditLogs = logs;
+  for (const [selector, key, labels, title] of [
+    ['#audit-action', 'action', auditActions, 'Toutes les actions'],
+    ['#audit-entity', 'entity', auditEntities, 'Toutes les cibles'],
+  ]) {
+    const select = qs(selector);
+    if (!select) continue;
+    const selected = select.value;
+    select.innerHTML = `<option value="">${title}</option>` + [...new Set(logs.map((log) => log[key]))]
+      .map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(labels[value] || value)}</option>`).join('');
+    select.value = selected;
+  }
+  const query = (qs('#audit-search')?.value || '').trim().toLocaleLowerCase('fr');
+  const action = qs('#audit-action')?.value;
+  const entity = qs('#audit-entity')?.value;
+  const filtered = logs.filter((log) => {
+    const text = [log.user_name, auditActions[log.action] || log.action,
+      auditEntities[log.entity] || log.entity, log.entity_id, log.ip_address,
+      ...Object.entries(log.details || {}).map(([key, value]) => `${auditFields[key] || key} ${auditDetailValue(key, value, log.entity)}`)]
+      .join(' ').toLocaleLowerCase('fr');
+    return (!action || log.action === action) && (!entity || log.entity === entity) && (!query || text.includes(query));
+  });
+  qs('#audit-count').textContent = `${filtered.length} action(s) affich?e(s) sur ${logs.length} charg?e(s).`;
   qs('#audit-table').innerHTML = tableHtml(
-    ['Date', 'Utilisateur', 'Action', 'Cible', 'Details', 'IP'],
-    logs.map((log) => [
-      new Date(log.created_at).toLocaleString('fr-FR'),
-      log.user_name || '-',
-      log.action,
-      `${log.entity}${log.entity_id ? ` #${log.entity_id}` : ''}`,
-      `<span class="truncate">${Object.entries(log.details || {}).map(([key, value]) => `${key}: ${value ?? '-'}`).join(', ') || '-'}</span>`,
-      log.ip_address || '-',
-    ])
+    ['Date et heure', 'Utilisateur', 'Action', 'Cible', 'D?tails', 'Adresse IP'],
+    filtered.map((log) => {
+      const date = new Date(String(log.created_at).replace(' ', 'T'));
+      const details = Object.entries(log.details || {}).map(([key, value]) =>
+        `<div><dt>${escapeHtml(auditFields[key] || key)}</dt><dd>${escapeHtml(auditDetailValue(key, value, log.entity))}</dd></div>`).join('');
+      return [
+        escapeHtml(Number.isNaN(date.getTime()) ? log.created_at : date.toLocaleString('fr-FR')),
+        escapeHtml(log.user_name || 'Utilisateur supprim? / syst?me'),
+        `<span class="badge">${escapeHtml(auditActions[log.action] || log.action)}</span>`,
+        escapeHtml(`${auditEntities[log.entity] || log.entity}${log.entity_id ? ` #${log.entity_id}` : ''}`),
+        details ? `<dl class="audit-details">${details}</dl>` : '<span class="muted">Aucun d?tail enregistr?</span>',
+        escapeHtml(log.ip_address || 'Non renseign?e'),
+      ];
+    })
   );
+  if (!filtered.length) qs('#audit-table tbody').innerHTML = `<tr><td colspan="6" class="muted">${logs.length ? 'Aucune action ne correspond aux filtres.' : 'Aucune action enregistr?e pour le moment.'}</td></tr>`;
 }
 
 function roleLabel(role) {
@@ -1473,8 +1602,6 @@ async function loadAuditLogs() {
   }
 }
 
-<<<<<<< HEAD
-=======
 async function loadOperations() {
   if (!can('can_manage_operations')) return;
   try {
@@ -1590,7 +1717,6 @@ async function submitReview(event) {
   toast('Merci pour votre avis.');
 }
 
->>>>>>> 5f92b50 (mise a jour)
 async function updateContactMessageStatus(id, handled) {
   try {
     const payload = await api('admin/contact-message-status', {
@@ -1612,7 +1738,7 @@ async function saveDeliveryStaff(event) {
     id: data.get('id') ? Number(data.get('id')) : undefined,
     name: data.get('name'),
     phone: data.get('phone'),
-    access_code: data.get('access_code') || '',
+    password: data.get('password') || '',
     status: data.get('status'),
     active: form.elements.active.checked,
   };
@@ -1772,6 +1898,17 @@ async function exportPdf(type) {
   }
 }
 
+function renderAdminOrderSummary(summary) {
+    qs('#kpi-grid').innerHTML = `
+      <div class="kpi"><span>CA aujourd'hui</span><strong>${money(summary.revenue_today)}</strong></div>
+      <div class="kpi"><span>Commandes aujourd'hui</span><strong>${summary.orders_today}</strong></div>
+      <div class="kpi"><span>En attente</span><strong>${summary.pending}</strong></div>
+      <div class="kpi"><span>En livraison</span><strong>${summary.delivery}</strong></div>
+      <div class="kpi"><span>Paiements en attente</span><strong>${summary.payments_pending}</strong></div>
+      <div class="kpi"><span>Payé aujourd'hui</span><strong>${money(summary.payments_paid_today)}</strong></div>
+    `;
+}
+
 async function loadAdmin() {
   try {
     const payload = await api('admin/summary');
@@ -1782,22 +1919,14 @@ async function loadAdmin() {
     qs('#admin-user').textContent = `${state.user.name} - ${roleLabel(state.user.role)}`;
     applyRoleUI();
     state.deliveryStaff = payload.delivery_staff || [];
-<<<<<<< HEAD
-=======
     renderOperations(payload.operations || state.operations);
     renderKitchenOrders(payload.kitchen_orders || []);
->>>>>>> 5f92b50 (mise a jour)
     renderSystemChecks(payload.checks || []);
 
-    qs('#kpi-grid').innerHTML = `
-      <div class="kpi"><span>CA aujourd'hui</span><strong>${money(payload.summary.revenue_today)}</strong></div>
-      <div class="kpi"><span>Commandes aujourd'hui</span><strong>${payload.summary.orders_today}</strong></div>
-      <div class="kpi"><span>En attente</span><strong>${payload.summary.pending}</strong></div>
-      <div class="kpi"><span>En livraison</span><strong>${payload.summary.delivery}</strong></div>
-      <div class="kpi"><span>Paiements en attente</span><strong>${payload.summary.payments_pending}</strong></div>
-      <div class="kpi"><span>Payé aujourd'hui</span><strong>${money(payload.summary.payments_paid_today)}</strong></div>
-    `;
+    renderAdminOrderSummary(payload.summary);
     renderAdminTables(payload.orders);
+    latestAdminOrderId = Math.max(0, ...payload.orders.map((order) => Number(order.id)));
+    startAdminOrderUpdates();
     renderPos();
     renderAdminMenu();
     renderDeliveryStaff();
@@ -1808,13 +1937,8 @@ async function loadAdmin() {
     await loadReviews();
     if (can('can_view_stats')) await loadStats();
     await loadNotifications();
-<<<<<<< HEAD
-    await loadUsers();
-    await loadAuditLogs();
-=======
     if (can('can_manage_users')) await loadUsers();
     if (can('can_view_stats')) await loadAuditLogs();
->>>>>>> 5f92b50 (mise a jour)
   } catch (error) {
     showLogin();
     toast(error.message);
@@ -2028,7 +2152,31 @@ async function loadCatalog() {
   renderSocialLinks(state.operations.settings);
 }
 
+function closeMobileMenu() {
+  qs('#main-nav')?.classList.remove('is-open');
+  const toggle = qs('#menu-toggle');
+  toggle?.setAttribute('aria-expanded', 'false');
+  toggle?.setAttribute('aria-label', 'Ouvrir le menu');
+}
+
 function bindEvents() {
+  qs('#menu-toggle')?.addEventListener('click', () => {
+    const open = qs('#main-nav').classList.toggle('is-open');
+    qs('#menu-toggle').setAttribute('aria-expanded', String(open));
+    qs('#menu-toggle').setAttribute('aria-label', open ? 'Fermer le menu' : 'Ouvrir le menu');
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && qs('#main-nav')?.classList.contains('is-open')) {
+      closeMobileMenu();
+      qs('#menu-toggle')?.focus();
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.topbar')) closeMobileMenu();
+  });
+  qs('#audit-search')?.addEventListener('input', () => renderAuditLogs());
+  qs('#audit-action')?.addEventListener('change', () => renderAuditLogs());
+  qs('#audit-entity')?.addEventListener('change', () => renderAuditLogs());
   document.addEventListener('click', (event) => {
     const pageButton = event.target.closest('[data-page]');
     if (pageButton) showPage(pageButton.dataset.page);
@@ -2044,6 +2192,8 @@ function bindEvents() {
 
     const qtyButton = event.target.closest('[data-qty]');
     if (qtyButton) updateQty(qtyButton.dataset.qty, Number(qtyButton.dataset.delta));
+    const cancelButton = event.target.closest('[data-cancel-order]');
+    if (cancelButton && !cancelButton.disabled) cancelCustomerOrder(cancelButton);
 
     const posAddButton = event.target.closest('[data-pos-add]');
     if (posAddButton) addToPos(posAddButton.dataset.posAdd);
@@ -2063,12 +2213,9 @@ function bindEvents() {
       if (adminTab.dataset.adminTab === 'notifications') loadNotifications();
       if (adminTab.dataset.adminTab === 'clients') loadCustomers();
       if (adminTab.dataset.adminTab === 'audit') loadAuditLogs();
-<<<<<<< HEAD
-=======
       if (adminTab.dataset.adminTab === 'operations') loadOperations();
       if (adminTab.dataset.adminTab === 'kitchen') loadKitchen();
       if (adminTab.dataset.adminTab === 'reviews') loadReviews();
->>>>>>> 5f92b50 (mise a jour)
       if (adminTab.dataset.adminTab === 'messages') loadContactMessages();
       if (adminTab.dataset.adminTab === 'users') loadUsers();
     }
@@ -2094,8 +2241,6 @@ function bindEvents() {
     if (event.target.closest('[data-system-check]')) loadSystemChecks();
 
     if (event.target.closest('[data-audit-refresh]')) loadAuditLogs();
-<<<<<<< HEAD
-=======
     if (event.target.closest('[data-kitchen-refresh]')) loadKitchen();
 
     const nextStatus = event.target.closest('[data-next-status]');
@@ -2129,13 +2274,6 @@ function bindEvents() {
         form.elements.active.checked = Boolean(promo.active);
       }
     }
->>>>>>> 5f92b50 (mise a jour)
-
-    if (event.target.closest('[data-generate-delivery-code]')) {
-      const code = generatedSecret(8);
-      qs('#delivery-form').elements.access_code.value = code;
-      toast(`Code livreur genere: ${code}`);
-    }
 
     if (event.target.closest('[data-generate-user-password]')) {
       const password = generatedSecret(14);
@@ -2165,26 +2303,23 @@ function bindEvents() {
     if (event.target.closest('[data-driver-logout]')) logoutDriver();
   });
 
-  qs('#sort-menu').addEventListener('change', (event) => {
+  qs('#sort-menu')?.addEventListener('change', (event) => {
     state.sort = event.target.value;
     renderMenu();
   });
-  qs('#open-cart').addEventListener('click', () => toggleCart(true));
-  qs('#close-cart').addEventListener('click', () => toggleCart(false));
-  qs('#scrim').addEventListener('click', () => toggleCart(false));
-  qs('#logout-admin').addEventListener('click', logoutAdmin);
-  qs('#checkout-form').addEventListener('submit', submitOrder);
-  qs('#checkout-form').elements.fulfillment.addEventListener('change', syncFulfillmentFields);
+  qs('#open-cart')?.addEventListener('click', () => toggleCart(true));
+  qs('#close-cart')?.addEventListener('click', () => toggleCart(false));
+  qs('#scrim')?.addEventListener('click', () => toggleCart(false));
+  qs('#logout-admin')?.addEventListener('click', logoutAdmin);
+  qs('#checkout-form')?.addEventListener('submit', submitOrder);
+  qs('#checkout-form')?.elements.fulfillment.addEventListener('change', syncFulfillmentFields);
   qs('#delivery-zone')?.addEventListener('change', renderCart);
   qs('#schedule-mode')?.addEventListener('change', syncScheduleFields);
   qs('#scheduled-at')?.addEventListener('focus', updateScheduleBounds);
-  qs('#tracking-form').addEventListener('submit', trackOrder);
-<<<<<<< HEAD
-=======
+  qs('#tracking-form')?.addEventListener('submit', trackOrder);
   qs('#review-form')?.addEventListener('submit', (event) => submitReview(event).catch((error) => toast(error.message)));
->>>>>>> 5f92b50 (mise a jour)
-  qs('#driver-login-form').addEventListener('submit', submitDriverLogin);
-  qs('#login-form').addEventListener('submit', login);
+  qs('#driver-login-form')?.addEventListener('submit', submitDriverLogin);
+  qs('#login-form')?.addEventListener('submit', login);
   qs('#pos-form')?.addEventListener('submit', submitPosOrder);
   qs('#pos-search')?.addEventListener('input', (event) => {
     state.posSearch = event.target.value;
@@ -2195,14 +2330,12 @@ function bindEvents() {
     renderPos();
   });
   qs('#pos-amount-received')?.addEventListener('input', renderPosTicket);
-  qs('#menu-form').addEventListener('submit', saveMenuItem);
-  qs('#menu-form-reset').addEventListener('click', resetMenuForm);
-  qs('#menu-form').elements.image_url.addEventListener('input', syncMenuImagePreview);
-  qs('#menu-form').elements.image_file.addEventListener('change', syncMenuImagePreview);
-  qs('#delivery-form').addEventListener('submit', saveDeliveryStaff);
-  qs('#delivery-form-reset').addEventListener('click', resetDeliveryForm);
-<<<<<<< HEAD
-=======
+  qs('#menu-form')?.addEventListener('submit', saveMenuItem);
+  qs('#menu-form-reset')?.addEventListener('click', resetMenuForm);
+  qs('#menu-form')?.elements.image_url.addEventListener('input', syncMenuImagePreview);
+  qs('#menu-form')?.elements.image_file.addEventListener('change', syncMenuImagePreview);
+  qs('#delivery-form')?.addEventListener('submit', saveDeliveryStaff);
+  qs('#delivery-form-reset')?.addEventListener('click', resetDeliveryForm);
   qs('#settings-form')?.addEventListener('submit', (event) => saveSettings(event).catch((error) => toast(error.message)));
   qs('#hours-form')?.addEventListener('submit', (event) => saveHours(event).catch((error) => toast(error.message)));
   qs('#zone-form')?.addEventListener('submit', (event) => saveZone(event).catch((error) => toast(error.message)));
@@ -2219,11 +2352,10 @@ function bindEvents() {
     form.elements.id.value = '';
     form.elements.active.checked = true;
   });
->>>>>>> 5f92b50 (mise a jour)
-  qs('#notification-test-form').addEventListener('submit', sendNotificationTest);
-  qs('#user-form').addEventListener('submit', saveUser);
-  qs('#user-form-reset').addEventListener('click', resetUserForm);
-  qs('#contact-form').addEventListener('submit', async (event) => {
+  qs('#notification-test-form')?.addEventListener('submit', sendNotificationTest);
+  qs('#user-form')?.addEventListener('submit', saveUser);
+  qs('#user-form-reset')?.addEventListener('click', resetUserForm);
+  qs('#contact-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
@@ -2264,8 +2396,12 @@ async function init() {
   renderCart();
   try {
     await loadCatalog();
-    if (state.driverPhone) {
+    if (!isAdminPage && state.driverPhone) {
       qs('#driver-login-form').elements.phone.value = state.driverPhone;
+    }
+    if (isAdminPage) {
+      if (state.token) await loadAdmin();
+      return;
     }
     const initialPage = new URLSearchParams(window.location.search).get('page');
     if (initialPage && qs(`#page-${initialPage}`)) showPage(initialPage);

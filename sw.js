@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chez-ketchup-v22';
+const CACHE_NAME = 'chez-ketchup-v23';
 const ASSETS = [
   './',
   'index.php',

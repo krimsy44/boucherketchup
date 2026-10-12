@@ -18,14 +18,17 @@ header("Cache-Control: no-store");
   <meta property="og:title" content="Chez Ketchup - Commande en ligne à Dakar">
   <meta property="og:description" content="Commandez en ligne chez Chez Ketchup et suivez Boucher Ketchup sur ses réseaux sociaux.">
   <meta name="theme-color" content="#c9292f">
-  <link rel="stylesheet" href="assets/css/app.css?v=20261010-3">
+  <link rel="stylesheet" href="assets/css/app.css?v=20261012-9">
 </head>
 <body data-app="admin">
-  <header class="topbar"><a class="brand" href="admin.php" aria-label="Accueil administration Chez Ketchup"><img class="brand-logo" src="assets/img/chez-ketchup-logo.jpeg" alt=""> <span>Chez <strong>Ketchup</strong> &mdash; Administration</span></a><a class="secondary" href="index.php">Voir le site public</a></header>
+  <header class="topbar">
+    <a class="brand" href="admin.php" aria-label="Accueil administration Chez Ketchup"><img class="brand-logo" src="assets/img/chez-ketchup-logo.jpeg" alt=""> <span>Chez <strong>Ketchup</strong> &mdash; Administration</span></a>
+    <a class="secondary" href="index.php">Voir le site public</a>
+  </header>
   <main>
     <section class="page active" id="page-admin">
       <section class="admin-shell">
-        <aside class="admin-side">
+        <aside class="admin-side" id="admin-sidebar">
           <h2>Gestion</h2>
           <p id="admin-user">Connectez-vous pour gérer les commandes.</p>
           <button id="logout-admin" class="hidden">Se déconnecter</button>
@@ -83,10 +86,10 @@ header("Cache-Control: no-store");
                   <h3>Ticket caisse</h3>
                   <div class="form-grid">
                     <label>Client
-                      <input name="name" value="Client comptoir" required>
+                      <input name="name" required>
                     </label>
                     <label>Téléphone
-                      <input name="phone" type="tel" value="000000000" required>
+                      <input name="phone" type="tel" required>
                     </label>
                   </div>
                   <label>Note
@@ -430,6 +433,6 @@ header("Cache-Control: no-store");
     </section>
 
   </main>
-  <script src="assets/js/app.js?v=20261010-6"></script>
+  <script src="assets/js/app.js?v=20261012-9"></script>
 </body>
 </html>

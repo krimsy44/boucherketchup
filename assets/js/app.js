@@ -595,8 +595,8 @@ function clearPosTicket() {
   resetForm('#pos-form');
   const form = qs('#pos-form');
   if (form) {
-    form.elements.name.value = 'Client comptoir';
-    form.elements.phone.value = '000000000';
+    form.elements.name.value = '';
+    form.elements.phone.value = '';
     form.elements.status.value = 'prep';
     form.elements.payment_method.value = 'cash';
   }
@@ -2160,6 +2160,18 @@ function closeMobileMenu() {
 }
 
 function bindEvents() {
+  if (isAdminPage) {
+    const header = qs('.topbar');
+    const side = qs('.admin-side');
+    const updateAdminOffsets = () => {
+      document.documentElement.style.setProperty('--admin-header-height', `${header.offsetHeight}px`);
+      document.documentElement.style.setProperty('--admin-menu-height', `${side.offsetHeight}px`);
+    };
+    updateAdminOffsets();
+    const observer = new ResizeObserver(updateAdminOffsets);
+    observer.observe(header);
+    observer.observe(side);
+  }
   qs('#menu-toggle')?.addEventListener('click', () => {
     const open = qs('#main-nav').classList.toggle('is-open');
     qs('#menu-toggle').setAttribute('aria-expanded', String(open));

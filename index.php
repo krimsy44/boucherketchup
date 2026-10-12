@@ -21,7 +21,7 @@ if (($_GET["page"] ?? "") === "admin") {
   <meta property="og:description" content="Commandez en ligne chez Chez Ketchup et suivez Boucher Ketchup sur ses réseaux sociaux.">
   <link rel="manifest" href="manifest.webmanifest?v=20261010-2">
   <meta name="theme-color" content="#c9292f">
-  <link rel="stylesheet" href="assets/css/app.css?v=20261011-1">
+  <link rel="stylesheet" href="assets/css/app.css?v=20261012-8">
 </head>
 <body>
   <header class="topbar">
@@ -45,7 +45,7 @@ if (($_GET["page"] ?? "") === "admin") {
   <main>
     <section class="page active" id="page-home">
       <div class="hero">
-        <video class="hero-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
+        <video class="hero-video" autoplay muted loop playsinline preload="metadata" poster="assets/img/hero-chez-ketchup.jpeg" aria-hidden="true">
           <source src="assets/video/hero-chez-ketchup.mp4" type="video/mp4">
         </video>
         <div class="hero-copy">

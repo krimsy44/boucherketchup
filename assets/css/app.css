@@ -66,6 +66,20 @@ a { color: inherit; }
   border: 2px solid rgba(232,216,188,.9);
   box-shadow: 0 0 0 2px rgba(201,41,47,.45), 0 8px 22px rgba(0,0,0,.3);
 }
+body[data-app="admin"] .topbar .brand {
+  min-width: 0;
+  color: #fff;
+  font-family: "DM Sans", Arial, sans-serif;
+  text-decoration: none;
+}
+body[data-app="admin"] .topbar .brand span {
+  color: #fff;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+body[data-app="admin"] .topbar .brand strong {
+  color: var(--yellow);
+}
 .menu-toggle {
   display: none;
   align-items: center;
@@ -125,7 +139,8 @@ a { color: inherit; }
   padding: clamp(36px, 7vw, 88px) clamp(16px, 4vw, 56px);
   background:
     radial-gradient(circle at 16% 35%, rgba(192,57,43,.22), transparent 30%),
-    linear-gradient(135deg, rgba(243,156,18,.08), transparent 35%);
+    linear-gradient(135deg, rgba(243,156,18,.08), transparent 35%),
+    url('../img/hero-chez-ketchup.jpeg') center / cover no-repeat;
 }
 .hero::after {
   content: "";
@@ -548,18 +563,42 @@ textarea { resize: vertical; }
   min-height: calc(100vh - 68px);
 }
 .admin-side {
+  position: sticky;
+  top: var(--admin-header-height, 70px);
+  align-self: start;
+  max-height: calc(100vh - var(--admin-header-height, 70px));
+  max-height: calc(100dvh - var(--admin-header-height, 70px));
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 10;
   display: grid;
   align-content: start;
   gap: 8px;
   padding: 24px;
   border-right: 1px solid var(--line);
-  background: transparent;
+  background: var(--panel);
   backdrop-filter: none;
 }
-.admin-side p { color: var(--muted); line-height: 1.5; }
+.admin-side h2 {
+  margin: 8px 0 12px;
+  padding-right: 12px;
+  font-size: 1.75rem;
+  line-height: 1.25;
+}
+.admin-side p { color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
 .admin-nav {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+}
+.admin-side button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .admin-main { padding: clamp(16px, 4vw, 32px); }
 .hidden { display: none !important; }
@@ -691,7 +730,12 @@ td .status-select + .status-select { margin-top: 8px; }
 }
 .pos-ticket {
   position: sticky;
-  top: 86px;
+  top: calc(var(--admin-header-height, 70px) + 16px);
+  max-height: calc(100vh - var(--admin-header-height, 70px) - 32px);
+  max-height: calc(100dvh - var(--admin-header-height, 70px) - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .pos-ticket .cart-line {
   padding: 10px 0;
@@ -985,11 +1029,26 @@ td .status-select + .status-select { margin-top: 8px; }
     justify-content: flex-start;
   }
   .pos-shell { grid-template-columns: 1fr; }
-  .pos-ticket { position: static; }
+  .pos-ticket {
+    order: -1;
+    top: calc(var(--admin-header-height, 144px) + var(--admin-menu-height, 150px) + 16px);
+    max-height: calc(100vh - var(--admin-header-height, 144px) - var(--admin-menu-height, 150px) - 32px);
+    max-height: calc(100dvh - var(--admin-header-height, 144px) - var(--admin-menu-height, 150px) - 32px);
+    z-index: 2;
+    background: var(--panel);
+  }
   .admin-side {
+    display: grid;
+    max-height: min(60vh, calc(100dvh - var(--admin-header-height, 144px) - 16px));
+    padding: 12px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
+  body[data-app="admin"] .topbar .brand { flex: 1; margin-right: 0; }
+  .admin-side h2, .admin-side p { margin: 0; }
+  .admin-side h2 { margin: 8px 0 12px; }
+  .admin-nav { display: flex; flex-wrap: wrap; }
+  .admin-nav button { min-width: 0; white-space: normal; overflow-wrap: anywhere; min-height: 44px; }
   .two { grid-template-columns: 1fr; }
 }
 
